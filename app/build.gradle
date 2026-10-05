@@ -34,27 +34,13 @@ plugins {
     id("com.anthonycr.plugins.mezzanine") version "2.1.0"
 }
 
-// See: https://stackoverflow.com/a/53408667/3969362
-// Conditionally apply Firebase Google Plugins to flavors that needs it
-android.productFlavors.all { flavor ->
-    if (getGradle().getStartParameter().getTaskRequests().toString().toLowerCase().contains(flavor.name)) {
-        // Only download and playstore flavor need Firebase
-        if (flavor.name == "download" || flavor.name == "playstore") {
-            println("Building flavor with Firebase [${flavor.name}] - applying plugin")
-            // Google Services Gradle plugin
-            apply plugin: 'com.google.gms.google-services'
-            // Apply the Crashlytics Gradle plugin
-            apply plugin: 'com.google.firebase.crashlytics'
-        }
-    }
-}
+// 移除原版的 Firebase Google Plugins 动态应用逻辑
+// android.productFlavors.all { ... }
 
-// TODO: Find a way to put it the variant/type folder such as: generated/source/locale/slionsFullDownload/debug/acr/browser/lightning/locale
 def generatedLocaleListDir = layout.buildDirectory.dir('generated/source/locale/fulguris/locale')
 
 android {
     compileSdk = libs.versions.compileSdk.get().toInteger()
-    // Specify namespace for generated R and BuildConfig classes
     namespace = 'fulguris'
 
     // ==========================================================
@@ -81,8 +67,6 @@ android {
     buildTypes {
         debug {
             debuggable = true
-            // See: https://github.com/Slion/Fulguris/issues/116
-            // If we disable minify then we need multi DEX.
             multiDexEnabled = true
             minifyEnabled = false
             shrinkResources = false
@@ -96,18 +80,13 @@ android {
 
         release {
             debuggable = false
-            multiDexEnabled = true // Required for core library desugaring
-            // If you disable minify you need to make sure multi DEX library is loaded in release or you will get crashed on Android 5 devices and below
+            multiDexEnabled = true
             minifyEnabled = true
             shrinkResources = true
             proguardFiles getDefaultProguardFile(
                     'proguard-android-optimize.txt'),
                     'proguard-project.txt'
-            // Use debug signing for now
-            //signingConfig debug.signingConfig
-
             ndk {
-                //abiFilters "arm64-v8a", "armeabi-v7a", "armeabi", "mips"
             }
             enableUnitTestCoverage = false
             enableAndroidTestCoverage = false
@@ -117,7 +96,6 @@ android {
     testOptions {
         unitTests.all {
             jacoco {
-                // This option needs to be included for robolectric tests
                 includeNoLocationClasses = true
                 excludes = ['jdk.internal.*']
             }
@@ -127,31 +105,14 @@ android {
     flavorDimensions "BRAND", "VERSION", "PUBLISHER"
 
     productFlavors {
-
-        // The IDE default build variant is slionsFullDownloadDebug: isDefault is set
-        // once per flavor dimension (slions / full / download). The automation scripts
-        // are unaffected - they build the agent flavor explicitly, see
-        // scripts/tools/adb.py (AGENT_VARIANTS) and docs/features/agent-variant.md.
         slions {
             dimension "BRAND"
             isDefault = true
-            // 确保这里的 ApplicationID 在不变更时不会覆盖 defaultConfig 的
-            // 如果你需要完全分离，可以把它也注释掉，或者改为 "com.jincheng.browser"
             applicationId "com.jincheng.browser"
             versionCode libs.versions.slions.version.code.get().toInteger()
             versionName libs.versions.slions.version.name.get()
         }
 
-        /*
-        lightning {
-            dimension "BRAND"
-            applicationId "fulguris"
-            versionCode 101
-            versionName "5.1.0"
-        }
-        */
-
-        // Base version does not add application ID suffix
         base {
             dimension "VERSION"
             buildConfigField "boolean", "FULL_VERSION", "Boolean.parseBoolean(\"true\")"
@@ -164,15 +125,6 @@ android {
             applicationIdSuffix ".full"
         }
 
-        /*
-        lite {
-            dimension "VERSION"
-            buildConfigField "boolean", "FULL_VERSION", "Boolean.parseBoolean(\"false\")"
-            applicationIdSuffix ".lite"
-        }
-        */
-
-        // Undefined publisher do not add application ID suffix
         undef {
             dimension "PUBLISHER"
             buildConfigField "fulguris.Sponsorship", "SPONSORSHIP", "fulguris.Sponsorship.BRONZE"
@@ -197,35 +149,21 @@ android {
             buildConfigField "fulguris.Sponsorship", "SPONSORSHIP", "fulguris.Sponsorship.BRONZE"
         }
 
-        // Agent publisher: dedicated to AI-agent automated testing. Carries a
-        // distinct launcher icon (a robot, see app/src/agent/res) and a distinct
-        // application id so an agent-driven install lives ALONGSIDE a developer's
-        // own debug/release builds instead of clobbering them. Pairs with the
-        // standard build types: slionsFullAgentDebug / slionsFullAgentRelease.
-        // Not published anywhere and (unlike download/playstore) does not apply
-        // the Firebase plugins. See docs/features/agent-variant.md.
         agent {
             dimension "PUBLISHER"
             applicationIdSuffix ".agent"
             buildConfigField "fulguris.Sponsorship", "SPONSORSHIP", "fulguris.Sponsorship.BRONZE"
         }
-
     }
 
-    // Filter out invalid variants
     variantFilter { variant ->
         def names = variant.flavors*.name
-        // slions variant do not support base version and undef publisher
         if (names.contains("slions") && (names.contains("undef") || names.contains("base"))) {
-            // Gradle ignores any variants that satisfy the conditions above.
             setIgnore(true)
         }
     }
 
     packagingOptions {
-        // Enable 16KB page size alignment for Android 15+ compatibility
-        // This ensures native libraries are properly aligned for 16KB memory pages
-        // See: https://developer.android.com/guide/practices/page-sizes
         jniLibs {
             useLegacyPackaging = false
         }
@@ -234,12 +172,9 @@ android {
         }
     }
 
-    // Taken from: https://stackoverflow.com/a/59583066/3969362
-    // Needed to customize our APK file name per flavor
     applicationVariants.configureEach { variant ->
         variant.outputs.configureEach { output ->
             def versionName = variant.versionName
-            
             // ==========================================================
             // 将打出来的 APK 名字前缀从 Fulguris 改成 Jincheng
             // ==========================================================
@@ -247,11 +182,8 @@ android {
                 outputFileName = outputFileName.replaceFirst("^${base.archivesName.get()}", "Jincheng-v$versionName")
             }
         }
-
-        // Allow application id access from resources, most useful for explicit intent
         variant.resValue "string", "application_id", "\"${applicationId}\""
     }
-
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -260,9 +192,7 @@ android {
     }
 
     buildFeatures {
-        // That should give us both view and data binding
         dataBinding = true
-        // We notably use build config to define our sponsorships
         buildConfig = true
     }
     lint {
@@ -271,26 +201,16 @@ android {
 }
 
 jacoco {
-    toolVersion = '0.8.7' // See http://www.eclemma.org/jacoco/
+    toolVersion = '0.8.7'
 }
 
-// Name the AAB like the APKs above (Jincheng-v<version>-<dashed-variant>.aab).
-// AGP names the AAB from base.archivesName (default "app") plus the dashed
-// variant name, but the sign task's finalBundleFile output CAN be re-set at
-// configuration time. That matters because Android Studio's "Generate Signed
-// Bundle / APK" wizard copies the AAB from the task's REGISTERED output path —
-// a post-build rename (doLast) can't rename the file the wizard copies.
 android.applicationVariants.configureEach { variant ->
     if (!variant.flavorName.contains("slions")) return
     def variantName = variant.name.capitalize()
-    // The sign task is what actually writes the final AAB (FinalizeBundleTask).
-    // Its default output name is "app-<dashed-variant>.aab"; just swap the prefix.
     tasks.matching { it.name == "sign${variantName}Bundle" }.configureEach { signTask ->
         def aabFileName = signTask.finalBundleFileName.replaceFirst(/^app-/, "Jincheng-v${variant.versionName}-")
         signTask.finalBundleFile.set(layout.buildDirectory.file("outputs/bundle/${variant.name}/${aabFileName}"))
     }
-    // Safety net: if an old-format app-*.aab is left behind (e.g. by a build
-    // before this change), move it so the output dir only holds the Jincheng name.
     tasks.matching { it.name == "bundle${variantName}" }.configureEach { bundleTask ->
         bundleTask.doLast {
             def outDir = layout.buildDirectory.dir("outputs/bundle/${variant.name}").get().asFile
@@ -304,7 +224,6 @@ android.applicationVariants.configureEach { variant ->
     }
 }
 
-// unMock is required for tests that use android.net.Uri
 unMock {
     keepStartingWith "libcore."
     keep "android.net.Uri"
@@ -312,15 +231,9 @@ unMock {
 }
 
 dependencies {
-    // Multi DEX is needed for core library desugaring and when minify is disabled
-    // See [BrowserApp.attachBaseContext]
-    // See: https://github.com/Slion/Fulguris/issues/116
     implementation libs.androidx.multidex
-
-    // Core library desugaring for Sora Editor TextMate support
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 
-    // test dependencies
     implementation 'junit:junit:4.13.2'
     testImplementation 'org.assertj:assertj-core:3.15.0'
     testImplementation 'org.mockito:mockito-core:3.8.0'
@@ -329,67 +242,35 @@ dependencies {
     }
     testImplementation 'org.robolectric:robolectric:4.4'
 
-    // Jetpack AndroidX libraries
     implementation libs.androidx.palette.ktx
     implementation libs.androidx.annotation
     implementation libs.androidx.vectordrawable.animated
     implementation libs.androidx.appcompat
     implementation libs.androidx.recyclerview.v140
     implementation libs.androidx.swiperefreshlayout
-    // Needs to upgrade target SDK
     implementation libs.androidx.core.ktx.v1160
     implementation libs.androidx.core.splashscreen
     implementation libs.androidx.constraintlayout
     implementation libs.androidx.fragment
     implementation libs.androidx.drawerlayout
     implementation libs.androidx.preference.ktx
-    // Webkit: https://developer.android.com/jetpack/androidx/releases/webkit
     implementation 'androidx.webkit:webkit:1.10.0'
 
-    //def lifecycle_version = "2.4.0"
-    //implementation "androidx.lifecycle:lifecycle-viewmodel:$lifecycle_version"
-    //implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:$lifecycle_version"
-    // We had to use alpha release to be able to use edge-to-edge bottom sheet
-    // In code we use reflection to access some bottom sheet private class, methods and fields
-    // Whenever you update that library you will need to review those hacks, see adjustBottomSheet.
-    // Also search the code for BottomSheetDialog::class
     implementation "com.google.android.material:material:1.13.0"
-    //implementation group: 'com.google.android.material', name: 'material', version: '1.6.0-alpha01'
-
-    //
-    //implementation "net.slions.android:preference:0.1.0"
     implementation project(path: ":Preference")
-    //implementation project(path: ":Preference", configuration: "release")
-
-    // AppIntro library
     implementation project(path: ":AppIntro")
-
-    // Play Store billing
     playstoreImplementation 'com.android.billingclient:billing:8.3.0'
 
-    // html parsing for reading mode
     implementation 'org.jsoup:jsoup:1.13.1'
-
-    // reading mode
     implementation 'net.dankito.readability4j:readability4j:1.0.8'
 
-    // Sora Editor for viewing userscript source code
     implementation platform('io.github.Rosemoe.sora-editor:bom:0.23.4')
     implementation 'io.github.Rosemoe.sora-editor:editor'
     implementation 'io.github.Rosemoe.sora-editor:language-textmate'
 
-    // Built-in files support
     implementation(libs.mezzanine.core)
     ksp(libs.mezzanine.processor)
 
-    // Just using the local JAR won't work as is since the compiler has other unresolved dependencies
-    // We notably get java.lang.ClassNotFoundException: org.apache.commons.lang3.StringEscapeUtils when compiling
-    // See: https://stackoverflow.com/questions/28504174/noclassdeffounderror-org-apache-commons-lang3-stringutils
-    // Those dependencies are defined in the POM XML of the mezzanine-compiler package
-    //implementation files("libs/mezzanine-${mezzanineVersion}.jar")
-    //kapt files("libs/mezzanine-compiler-${mezzanineVersion}.jar")
-
-    // dependency injection
     implementation "com.google.dagger:dagger:$daggerVersion"
     kapt "com.google.dagger:dagger-compiler:$daggerVersion"
     implementation "com.google.dagger:hilt-android:$daggerVersion"
@@ -397,53 +278,28 @@ dependencies {
 
     compileOnly 'javax.annotation:jsr250-api:1.0'
 
-
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-
-    // rx
     implementation 'io.reactivex.rxjava2:rxandroid:2.1.1'
     implementation 'io.reactivex.rxjava2:rxjava:2.2.21'
     implementation 'io.reactivex.rxjava2:rxkotlin:2.4.0'
 
-    // memory leak analysis
     debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.14'
 
-    // Kotlin
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinVersion"
-    //implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion"
 
-    // Firebase
-    // Recommended: Add the Firebase SDK for Google Analytics.
-    playstoreImplementation 'com.google.firebase:firebase-analytics:21.6.1'
-    downloadImplementation 'com.google.firebase:firebase-analytics:21.6.1'
-    // Add the Firebase SDK for Crashlytics.
-    playstoreImplementation 'com.google.firebase:firebase-crashlytics:18.6.3'
-    downloadImplementation 'com.google.firebase:firebase-crashlytics:18.6.3'
+    // 彻底移除 Firebase Analytics 和 Crashlytics 依赖
+    // playstoreImplementation 'com.google.firebase:firebase-analytics:21.6.1'
+    // downloadImplementation 'com.google.firebase:firebase-analytics:21.6.1'
+    // playstoreImplementation 'com.google.firebase:firebase-crashlytics:18.6.3'
+    // downloadImplementation 'com.google.firebase:firebase-crashlytics:18.6.3'
 
-
-    // Volley HTTP request
     implementation libs.volley
-
-    // Since java.time need API 26 we use that backport instead
-    // See: https://github.com/JakeWharton/ThreeTenABP
     implementation libs.threetenabp
-
-    // Logs
     implementation libs.timber
 }
 
-
-// -------------------------------------------------------------------------------------------------
-// L10N: Generate list of locales
-// Fulguris provides its own (Android independent) locale switcher. That switcher requires a list
-// of locale codes. We generate that list here to avoid having to manually maintain a list of locales.
-// This code was taken from Mozilla Focus project:
-// https://github.com/mozilla-mobile/focus-android
-// -------------------------------------------------------------------------------------------------
-
 def getEnabledLocales() {
     def resDir = file('src/main/res')
-
     def potentialLanguageDirs = resDir.listFiles(new FilenameFilter() {
         @Override
         boolean accept(File dir, String name) {
@@ -452,20 +308,14 @@ def getEnabledLocales() {
     })
 
     def langs = potentialLanguageDirs.findAll {
-        // Only select locales where strings.xml exists
-        // Some locales might only contain e.g. sumo URLS in urls.xml, and should be skipped (see es vs es-ES/es-MX/etc)
         return  file(new File(it, "strings.xml")).exists()
     } .collect {
-        // And reduce down to actual values-* names
         return it.name
     } .collect {
         return it.substring("values-".length())
     } .collect {
         if (it.length() > 3 && it.contains("-r")) {
-            // Android resource dirs add an "r" prefix to the region - we need to strip that for java usage
-            // Add 1 to have the index of the r, without the dash
             def regionPrefixPosition = it.indexOf("-r") + 1
-
             return it.substring(0, regionPrefixPosition) + it.substring(regionPrefixPosition + 1)
         } else {
             return it
@@ -474,9 +324,7 @@ def getEnabledLocales() {
         return '"' + it + '"'
     }
 
-    // en-US is the default language (in "values") and therefore needs to be added separately
     langs << "\"en-US\""
-
     return langs.sort { it }
 }
 
@@ -498,7 +346,6 @@ task generateLocaleList {
         localeList << "import java.util.List;" << "\n"
         localeList << "\n"
         localeList << "public class LocaleList {" << "\n"
-        // findbugs doesn't like "public static final String[]", see http://findbugs.sourceforge.net/bugDescriptions.html#MS_MUTABLE_ARRAY
         localeList << "    public static final List<String> BUNDLED_LOCALES = Collections.unmodifiableList(Arrays.asList(new String[] { "
         localeList << getEnabledLocales().join(", ") + " }));" << "\n"
         localeList << "}" << "\n"
@@ -530,7 +377,6 @@ mezzanine {
             "src/main/js/BlobHook.js"
     )
 }
-
 
 kotlin {
     jvmToolchain(17)
