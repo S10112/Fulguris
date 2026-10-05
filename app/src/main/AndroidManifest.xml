@@ -3,25 +3,13 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:installLocation="auto">
 
-    <!-- Play Billing Library 8 (and its play-services-basement dependency) declare
-         minSdk 23; we keep supporting API 21 (the billing feature only ships in the
-         playstore flavor). May lead to runtime failures on API 21-22 devices if the
-         libraries use newer APIs. -->
     <uses-sdk tools:overrideLibrary="com.android.billingclient,com.google.android.gms.common" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- Required for notifications on Android 13+ (API level 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <!--
-    From Android 12 we need ACCESS_COARSE_LOCATION location too if asking for ACCESS_FINE_LOCATION
-    User can then decide if she wants to give us fine or approximate location.
-    See: https://developer.android.com/about/versions/12/migration
-    See: https://proandroiddev.com/android-12-privacy-changes-for-location-55ffd8c016fd
-    See: https://developer.android.com/training/location/permissions#approximate-request
-    -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -29,7 +17,6 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <!-- Required to install APK files from Android 8.0+ (API 26+) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature
@@ -47,27 +34,20 @@
     <uses-feature
         android:name="android.hardware.touchscreen"
         android:required="false" />
-
-    <!--
-    Input translation mode must be disabled to avoid issues on PC:
-    See: https://developer.android.com/guide/topics/large-screens/input-compatibility-large-screens#input_translation_mode
-    Though it seems it is not working as intended…
-    -->
     <uses-feature
         android:name="android.hardware.type.pc"
         android:required="false" />
 
     <queries>
         <intent>
-            <!-- Needed to be able to launch third party applications -->
             <action android:name="android.intent.action.MAIN" />
         </intent>
     </queries>
 
-    <!-- Android TV support -->
     <uses-feature
         android:name="android.software.leanback"
         android:required="false" />
+        
     <application
         android:name="fulguris.App"
         android:allowBackup="true"
@@ -79,50 +59,26 @@
         android:requestLegacyExternalStorage="false"
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:theme="@style/Theme.App.Black"
-        >
+        android:theme="@style/Theme.App.Black">
 
-        <!--
-            Support super narrow Samsung cover display on early Z Fold models, see:
-            https://developer.samsung.com/sdp/blog/en/2019/01/31/how-to-update-your-apps-for-foldable-displays
-            https://developer.samsung.com/sdp/blog/en/2019/04/05/seven-mistakes-to-avoid-when-developing-for-the-galaxy-fold
-        -->
         <meta-data android:name="android.max_aspect" android:value="3.0" />
-        <!-- Declare compatibility with Android TV -->
         <meta-data
             android:name="com.google.android.tv.region"
             android:value="true" />
-        <!--
-            Make sure you start fullscreen on Huawei/Honor foldable internal display, see:
-            https://developer.huawei.com/consumer/en/doc/90101
-        -->
         <meta-data android:name="android.min_aspect" android:value="1.0" />
-        <!--
-            The "Stealth" incognito launcher entry is a *dynamic* app shortcut registered at
-            launch (see App.registerIncognitoShortcut), so IncognitoActivity does not need its
-            own launcher icon. It is a dynamic shortcut (not a static res/xml one) because
-            launchers such as Samsung One UI only render dynamic shortcuts bound to the
-            launcher icon's own activity (SplashActivity) in the app long-press menu.
-        -->
 
-        <!-- Splash screen activity not sure exactly if we need MAIN and DEFAULT intent TBH -->
-        <!-- Make it resizable for Multi-Window mode support, such as Samsung Dex
-        Needed to be in the root activity which is our splash screen apparently.
-        -->
         <activity android:name="fulguris.activity.SplashActivity"
             android:theme="@style/Theme.App.SplashScreen"
             android:resizeableActivity="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.APP_BROWSER" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
@@ -131,7 +87,6 @@
             android:name="android.webkit.WebView.MetricsOptOut"
             android:value="true" />
 
-        <!-- No MAIN intent filter as this is launched through our splash screen -->
         <activity
             android:name="fulguris.activity.MainActivity"
             android:alwaysRetainTaskState="true"
@@ -145,13 +100,10 @@
             android:windowSoftInputMode="stateHidden|adjustResize"
             android:exported="true">
 
-            <!--  Handle various mime types and allow being used as default viewer -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-
                 <data android:scheme="http" />
                 <data android:scheme="https" />
                 <data android:scheme="file" />
@@ -159,7 +111,6 @@
                 <data android:scheme="about" />
                 <data android:scheme="javascript" />
                 <data android:scheme="fulguris" />
-
                 <data android:mimeType="text/html" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/xhtml+xml" />
@@ -180,44 +131,31 @@
 
             <intent-filter>
                 <action android:name="info.guardianproject.panic.action.TRIGGER" />
-
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
-            <!--
-            For Fulguris to show up in Android Sharesheet.
-            See: https://developer.android.com/training/sharing/receive
-            We will accept text to put it in the address bar.
-             -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="text/x-uri" />
             </intent-filter>
-            <!-- Custom action to open the configuration settings bottom sheet (tests / debugging) -->
+            
             <intent-filter>
                 <action android:name="fulguris.action.OPEN_CONFIGURATION" />
-
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
-            <!-- Custom actions to close tabs (tests / debugging) -->
+            
             <intent-filter>
                 <action android:name="fulguris.action.CLOSE_TAB" />
-
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <intent-filter>
                 <action android:name="fulguris.action.CLOSE_ALL_TABS" />
-
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
-        <!--
-        Incognito activity can now be used exactly like the main activity
-        -->
-        <!-- TODO: Launch this through splash screen too? -->
         <activity
             android:name="fulguris.activity.IncognitoActivity"
             android:alwaysRetainTaskState="true"
@@ -231,19 +169,10 @@
             android:windowSoftInputMode="stateHidden|adjustResize"
             android:exported="true">
 
-            <!--
-            Incognito (Stealth) is no longer a separate launcher icon: it is a dynamic
-            launcher app shortcut instead (long-press the app icon → "Stealth", see
-            App.registerIncognitoShortcut), so there is no MAIN/LAUNCHER filter here.
-            -->
-
-            <!--  Handle various mime types and allow being used as default viewer -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-
                 <data android:scheme="http" />
                 <data android:scheme="https" />
                 <data android:scheme="file" />
@@ -251,7 +180,6 @@
                 <data android:scheme="about" />
                 <data android:scheme="javascript" />
                 <data android:scheme="fulguris" />
-
                 <data android:mimeType="text/html" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/xhtml+xml" />
@@ -272,22 +200,15 @@
 
             <intent-filter>
                 <action android:name="info.guardianproject.panic.action.TRIGGER" />
-
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
-            <!--
-            For Fulguris to show up in Android Sharesheet.
-            See: https://developer.android.com/training/sharing/receive
-            We will accept text to put it in the address bar.
-             -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="text/x-uri" />
             </intent-filter>
-
         </activity>
 
         <activity-alias
@@ -295,14 +216,10 @@
             android:targetActivity="fulguris.activity.MainActivity"
             android:exported="true"
             android:enabled="false">
-
-            <!--  Handle various URL scheme and allow being used as default browser -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-
                 <data android:scheme="http" />
                 <data android:scheme="https" />
                 <data android:scheme="file" />
@@ -310,7 +227,6 @@
                 <data android:scheme="about" />
                 <data android:scheme="javascript" />
                 <data android:scheme="fulguris" />
-
             </intent-filter>
         </activity-alias>
 
@@ -319,14 +235,10 @@
             android:targetActivity="fulguris.activity.IncognitoActivity"
             android:exported="true"
             android:enabled="false">
-
-            <!--  Handle various URL scheme and allow being used as default browser -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-
                 <data android:scheme="http" />
                 <data android:scheme="https" />
                 <data android:scheme="file" />
@@ -334,12 +246,9 @@
                 <data android:scheme="about" />
                 <data android:scheme="javascript" />
                 <data android:scheme="fulguris" />
-
             </intent-filter>
         </activity-alias>
 
-
-        <!-- Transparent activity for browser selection dialog -->
         <activity
             android:name="fulguris.activity.SelectBrowserActivity"
             android:theme="@style/Theme.App.Transparent"
@@ -348,23 +257,15 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:launchMode="singleInstance">
-
-            <!-- Handle VIEW intents to show browser chooser -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-
                 <data android:scheme="http" />
                 <data android:scheme="https" />
             </intent-filter>
         </activity>
 
-        <!--
-        Transparent activity for selecting OTHER browsers (excludes this app)
-        Used during onboarding to make sure links are opened in other browsers so as not to break our workflow.
-        -->
         <activity
             android:name="fulguris.activity.SelectOtherBrowserActivity"
             android:theme="@style/Theme.App.Transparent"
@@ -374,9 +275,6 @@
             android:taskAffinity=""
             android:launchMode="singleInstance" />
 
-        <!-- App Introduction Activity
-             Force dark theme for intro regardless of system and user preferences
-        -->
         <activity
             android:name="fulguris.activity.IntroActivity"
             android:theme="@style/Theme.App.Dark"
@@ -391,14 +289,7 @@
             android:theme="@style/Theme.App.DayNight"
             android:exported="true">
             <intent-filter>
-                <!--
-                Enable settings access from the App info system settings page, through the gear icon usually.
-                That notably let user access settings even if the browser is crashing for instance.
-                        HONOR Magic V2: App info gear icon, top right corner next to app icon and name
-                        Samsung Galaxy Tab S8 Ultra: App info page bottom click on 'In-app notification settings'
-                 -->
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
-                <!-- Not sure what that does -->
                 <action android:name="android.intent.action.SETTINGS" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
@@ -410,6 +301,7 @@
             android:parentActivityName="fulguris.activity.SettingsActivity"
             android:theme="@style/Theme.App.DayNight"
             android:exported="false" />
+            
         <activity
             android:name="fulguris.activity.ReadingActivity"
             android:colorMode="wideColorGamut"
@@ -419,8 +311,38 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.READING" />
-
                 <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        
+        <activity android:name="fulguris.userscript.UserScriptActivity"
+            android:label="Userscript"
+            android:theme="@style/Theme.App.Light"
+            android:resizeableActivity="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.user\\.js" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.user\\.js" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/javascript" />
+                <data android:mimeType="text/javascript" />
             </intent-filter>
         </activity>
 
@@ -434,22 +356,8 @@
                 android:resource="@xml/filepaths" />
         </provider>
 
-        <!-- Firebase configuration -->
         <meta-data android:name="firebase_analytics_collection_enabled" android:value="@bool/pref_default_analytics" />
         <meta-data android:name="firebase_crashlytics_collection_enabled" android:value="@bool/pref_default_crash_report" />
-
-        <!-- We won't need this for now. We experimented with that as we were trying to open file explorer to a directory. -->
-        <!--
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.provider"
-            android:exported="true"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/provider_paths" />
-        </provider>
-        -->
 
     </application>
 
