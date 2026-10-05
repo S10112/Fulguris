@@ -1270,8 +1270,8 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         if (!isIncognito()) {
             // For some reason that was crashing when incognito
             // I'm guessing somehow that's already disabled when incognito
-            setAnalyticsCollectionEnabled(this, userPreferences.analytics)
-            setCrashlyticsCollectionEnabled(userPreferences.crashReport)
+            //setAnalyticsCollectionEnabled(this, userPreferences.analytics)
+           // setCrashlyticsCollectionEnabled(userPreferences.crashReport)
         }
 
         swapBookmarksAndTabs = userPreferences.bookmarksAndTabsSwapped
