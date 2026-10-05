@@ -149,7 +149,6 @@ class WebPageClient(
         val scheme = reqUri.scheme?.lowercase() ?: ""
         val rawUrl = reqUri.toString()
 
-        // 核心纠偏与底层拦截：零硬编码，适用于任意域名
         if (request.isForMainFrame) {
             // 防火墙 1：严禁任何 https 带着明文 802 端口发起请求
             if (scheme == "https" && reqUri.port == 802) {
@@ -177,6 +176,20 @@ class WebPageClient(
                             activity.runOnUiThread {
                                 view.stopLoading()
                                 view.loadUrl(resolved)
+                            }
+                        }
+                    }
+                }
+            }
+            // 防火墙 3：针对从历史记录、书签或后台恢复的带有端口的请求，静默验证以更新地址栏状态
+            else if (reqUri.port != -1 && (scheme == "http" || scheme == "https")) {
+                if (!DnsPortResolver.isCached(rawUrl)) {
+                    kotlinx.coroutines.runBlocking {
+                        if (DnsPortResolver.verifyAndCachePort(rawUrl)) {
+                            activity.runOnUiThread {
+                                // 验证通过是专属端口，强制刷新地址栏触发隐藏机制
+                                webPageTab.lastUrl = ""
+                                updateUrlIfNeeded(rawUrl)
                             }
                         }
                     }
@@ -526,15 +539,11 @@ class WebPageClient(
 
     private var debounceLaunch: Runnable? = null
 
-    /**
-     * 页面内点击与超链接跳转拦截（纯动态，无任何特定域名硬编码）
-     */
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url.toString()
         val uri = request.url
         val scheme = uri.scheme?.lowercase() ?: ""
 
-        // 已经带有端口的请求：如果发现 https 误挂了 802，强制瞬间重定向为 803
         if (uri.port != -1) {
             if (scheme == "https" && uri.port == 802) {
                 val fixedUrl = url.replace(":802", ":803")
@@ -544,7 +553,6 @@ class WebPageClient(
             return false
         }
 
-        // 检查当前访问的 URL 是否已在 DNS 缓存中命中非标端口
         val cachedUrl = DnsPortResolver.getCachedUrl(url)
         if (cachedUrl != null && cachedUrl != url) {
             view.loadUrl(cachedUrl)
