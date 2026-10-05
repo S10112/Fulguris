@@ -182,13 +182,14 @@ class WebPageClient(
                     }
                 }
             }
-            // 防火墙 3：针对从历史记录、书签或后台恢复的带有端口的请求，静默验证以更新地址栏状态
+            // 防火墙 3：针对恢复会话、历史记录点击等带有端口的请求，确认默认端口并隐藏
             else if (reqUri.port != -1 && (scheme == "http" || scheme == "https")) {
-                if (!DnsPortResolver.isCachedAsDefaultPort(rawUrl)) {
+                val host = reqUri.host?.lowercase() ?: ""
+                if (!DnsPortResolver.isDefaultPort(scheme, host, reqUri.port)) {
                     runBlocking {
                         if (DnsPortResolver.verifyAndCachePort(rawUrl)) {
                             activity.runOnUiThread {
-                                webPageTab.lastUrl = "" // 强制失效触发 UI 更新
+                                webPageTab.lastUrl = ""
                                 updateUrlIfNeeded(rawUrl)
                             }
                         }
