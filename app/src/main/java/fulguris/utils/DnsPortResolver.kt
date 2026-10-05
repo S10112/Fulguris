@@ -205,10 +205,36 @@ object DnsPortResolver {
     }
 
     /**
-     * 地址栏净化过滤
+     * ==============================================
+     * 地址栏净化过滤（智能判定版）：
+     * 1. 隐藏绝对标准端口 (80/443)
+     * 2. 隐藏 DNS 解析出来的“专属默认端口”（如 8641）
+     * 3. 用户手动输入的其他非标端口，正常显示
+     * ==============================================
      */
     fun cleanUrlForDisplay(url: String): String {
         if (url.isBlank()) return url
-        return url.replace(Regex(""":(80[0-9]|808[0-9]|80|443)(?=[/?#]|$)"""), "")
+        val uri = try { Uri.parse(url) } catch (e: Exception) { return url }
+        val port = uri.port
+        
+        // 没有自带端口的直接放行
+        if (port == -1) return url
+        
+        val host = uri.host?.lowercase() ?: return url
+        val scheme = uri.scheme?.lowercase() ?: ""
+        
+        // 1. 如果是业界绝对标准的 80 或 443，一律隐藏
+        if ((scheme == "http" && port == 80) || (scheme == "https" && port == 443)) {
+            return url.replaceFirst(Regex(""":$port(?=[/?#]|$)"""), "")
+        }
+
+        // 2. 如果端口正好是我们通过 DNS 动态解析出来的“接管端口”，视同为新默认端口，隐藏它
+        val cachedPort = portCache["$scheme:$host"]
+        if (cachedPort != null && cachedPort == port) {
+            return url.replaceFirst(Regex(""":$port(?=[/?#]|$)"""), "")
+        }
+
+        // 3. 其他情况（即用户手动输入的非接管端口），保留原样显示
+        return url
     }
 }
