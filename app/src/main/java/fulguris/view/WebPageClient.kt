@@ -181,14 +181,13 @@ class WebPageClient(
                     }
                 }
             }
-            // 防火墙 3：针对从历史记录、书签或后台恢复的带有端口的请求，静默验证以更新地址栏状态
+            // 防火墙 3：针对恢复会话、历史记录点击等带有端口的请求，静默验证以更新地址栏状态
             else if (reqUri.port != -1 && (scheme == "http" || scheme == "https")) {
-                if (!DnsPortResolver.isCached(rawUrl)) {
+                if (!DnsPortResolver.isCachedAsDefaultPort(rawUrl)) {
                     kotlinx.coroutines.runBlocking {
                         if (DnsPortResolver.verifyAndCachePort(rawUrl)) {
                             activity.runOnUiThread {
-                                // 验证通过是专属端口，强制刷新地址栏触发隐藏机制
-                                webPageTab.lastUrl = ""
+                                webPageTab.lastUrl = "" // 强制失效触发 UI 更新
                                 updateUrlIfNeeded(rawUrl)
                             }
                         }
