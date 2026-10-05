@@ -1,4 +1,4 @@
-name: Build Fulguris APK
+name: Build Fulguris Release APK
 
 on:
   push:
@@ -26,13 +26,19 @@ jobs:
       - name: 赋予 gradlew 执行权限
         run: chmod +x gradlew
 
-      - name: 编译 Debug APK
-        # 使用 assembleDebug 会让 Gradle 自动对齐多模块间的依赖匹配
-        run: ./gradlew assembleDebug --stacktrace
+      - name: 配置 Release 签名并构建
+        # 仅针对目标变体构建，使用 debug 签名保证直接安装，并自动关闭 LeakCanary
+        run: |
+          ./gradlew assembleSlionsFullDownloadRelease \
+            -Pandroid.injected.signing.store.file=$HOME/.android/debug.keystore \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password=android \
+            --stacktrace
 
-      - name: 提取并上传生成的 APK
+      - name: 提取并上传 Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: Fulguris-Debug-APK
-          path: app/build/outputs/apk/**/*.apk
+          name: Fulguris-Release-APK
+          path: app/build/outputs/apk/slionsFullDownload/release/*.apk
           if-no-files-found: error
