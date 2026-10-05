@@ -35,6 +35,7 @@ import fulguris.settings.preferences.UserPreferences
 import fulguris.ssl.SslState
 import fulguris.userscript.UserScript
 import fulguris.utils.*
+import fulguris.utils.DnsPortResolver
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
@@ -106,6 +107,8 @@ class WebPageClient(
 
     private var adBlock: AdBlocker
 
+    // Needed this to keep track of all SSL error since it seems onReceivedSslError is not called again after you proceed
+    // We use this list to make sure our SSL state is maintained correctly after navigating away and back between various SSL error pages
     private var sslErrorUrls = arrayListOf<String>()
 
     @Volatile private var isRunning = false
@@ -113,12 +116,16 @@ class WebPageClient(
 
     private var currentUrl: String = ""
 
+    // Count the number of resources loaded since the page was last started
     private var iResourceCount: Int = 0
 
+    // Track page load timing for profiling
     private var pageLoadStartTime: Long = 0
 
+    // Used to skip operations when onPageFinished is called multiple times, YouTube.com does that for instance
     private var onPageFinishedDone = false
 
+    // Track all requests for the current page and whether they were blocked
     data class PageRequest(
         val url: String,
         val wasBlocked: Boolean,
@@ -127,8 +134,14 @@ class WebPageClient(
 
     private val pageRequests = mutableListOf<PageRequest>()
 
+    /**
+     * Get all requests for the current page
+     */
     fun getPageRequests(): List<PageRequest> = pageRequests.toList()
 
+    /**
+     * Clear tracked requests
+     */
     fun clearPageRequests() {
         pageRequests.clear()
     }
@@ -153,6 +166,9 @@ class WebPageClient(
         noopBlocker
     }
 
+    /**
+     * Should be called once when the root HTML page had been loaded.
+     */
     private fun applyDesktopModeIfNeeded(aView: WebView) {
         aView.settings.useWideViewPort = false
 
@@ -165,6 +181,9 @@ class WebPageClient(
         }
     }
 
+    /**
+     * Overrides [WebViewClient.shouldInterceptRequest].
+     */
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         Timber.v("$ihs : shouldInterceptRequest - ${if (request.isForMainFrame) "Main frame" else "Resource"} - ${request.url}")
 
@@ -207,6 +226,9 @@ class WebPageClient(
         return null
     }
 
+    /**
+     * Reset location permissions for current domain if Android location permission is missing.
+     */
     fun resetLocationPermissionIfNeeded() {
         if (domainPreferences.isDefault) {
             return
@@ -229,6 +251,9 @@ class WebPageClient(
         }
     }
 
+    /**
+     * Overrides [WebViewClient.onLoadResource]
+     */
     override fun onLoadResource(view: WebView, url: String?) {
         super.onLoadResource(view, url)
 
@@ -244,15 +269,19 @@ class WebPageClient(
     }
 
     /**
-     * 原生 URL 状态同步更新（不强行用不存在的工具类隐藏端口，保持系统稳定性）
+     * 地址栏净化：更新给界面的 URL 自动过滤掉非标端口，只显示干净域名
      */
     fun updateUrlIfNeeded(url: String) {
-        if (webPageTab.lastUrl != url) {
-            webPageTab.lastUrl = url
+        val cleanUrl = DnsPortResolver.cleanUrlForDisplay(url)
+        if (webPageTab.lastUrl != cleanUrl) {
+            webPageTab.lastUrl = cleanUrl
             webBrowser.onTabChangedUrl(webPageTab)
         }
     }
 
+    /**
+     * Overrides [WebViewClient.onPageFinished].
+     */
     override fun onPageFinished(view: WebView, url: String) {
         val pageLoadDuration = System.currentTimeMillis() - pageLoadStartTime
         val skip = onPageFinishedDone || view.progress != 100
@@ -323,6 +352,9 @@ class WebPageClient(
         }
     }
 
+    /**
+     * Overrides [WebViewClient.onPageStarted]
+     */
     @SuppressLint("SetJavaScriptEnabled")
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
         Timber.i("$ihs : onPageStarted - $url")
@@ -572,31 +604,25 @@ class WebPageClient(
 
     /**
      * 核心拦截与放行逻辑：
-     * 1. 凡是已由 WebPageTab 换装了 802/803 端口的请求，直接放行直连；
-     * 2. 网页内部相对链接/超链接如果再次触发 g.6z.ee，自动补齐 802/803 端口，杜绝撞回失效的 80/443；
-     * 3. 彻底杜绝异步 DNS 重复请求，避免 Android 系统把请求认定为 cancelled。
+     * 1. 凡是已由 WebPageTab 换装了非标端口的请求，直接放行直连；
+     * 2. 网页内部超链接或重定向若遇到命中缓存的非标端口域名，瞬间以目标端口加载，杜绝跌落回 80/443；
+     * 3. 避免二次异步竞争与中断。
      */
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         Timber.i("$ihs : shouldOverrideUrlLoading - ${request.url}")
 
         val url = request.url.toString()
         val uri = request.url
-        val host = uri.host?.lowercase() ?: ""
-        val scheme = uri.scheme?.lowercase() ?: "http"
 
-        // 已经带有端口的请求直接放行
+        // 如果已经携带了端口，直接放行直连
         if (uri.port != -1) {
             return false
         }
 
-        // 网页内超链接点击：命中 g.6z.ee 且未显式带端口时，自动以 802/803 接管默认功能
-        if (host == "g.6z.ee" && (scheme == "http" || scheme == "https")) {
-            val targetPort = if (scheme == "https") 803 else 802
-            val path = uri.encodedPath ?: ""
-            val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
-            val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
-            val targetUrl = "$scheme://$host:$targetPort$path$query$fragment"
-            view.loadUrl(targetUrl)
+        // 检查当前访问的 URL 是否已在 DNS 缓存中命中非标端口；若命中则以重写后的 URL 加载，防止重定向回落到 80/443
+        val cachedUrl = DnsPortResolver.getCachedUrl(url)
+        if (cachedUrl != null && cachedUrl != url) {
+            view.loadUrl(cachedUrl)
             return true
         }
 
