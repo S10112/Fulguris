@@ -22,6 +22,7 @@ import fulguris.extensions.setIcon
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch as coroutineLaunch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import fulguris.html.homepage.HomePageFactory
 import fulguris.js.InvertPage
@@ -63,6 +64,7 @@ import fulguris.utils.ThemeUtils
 import fulguris.utils.htmlColor
 import fulguris.utils.isSpecialUrl
 import timber.log.Timber
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.*
 import kotlin.math.abs
@@ -106,26 +108,15 @@ class WebPageClient(
     val userScriptManager: fulguris.userscript.UserScriptManager = hiltEntryPoint.userScriptManager
 
     private var adBlock: AdBlocker
-
-    // Needed this to keep track of all SSL error since it seems onReceivedSslError is not called again after you proceed
-    // We use this list to make sure our SSL state is maintained correctly after navigating away and back between various SSL error pages
     private var sslErrorUrls = arrayListOf<String>()
 
     @Volatile private var isRunning = false
     private var zoomScale = 0.0f
-
     private var currentUrl: String = ""
-
-    // Count the number of resources loaded since the page was last started
     private var iResourceCount: Int = 0
-
-    // Track page load timing for profiling
     private var pageLoadStartTime: Long = 0
-
-    // Used to skip operations when onPageFinished is called multiple times, YouTube.com does that for instance
     private var onPageFinishedDone = false
 
-    // Track all requests for the current page and whether they were blocked
     data class PageRequest(
         val url: String,
         val wasBlocked: Boolean,
@@ -134,14 +125,8 @@ class WebPageClient(
 
     private val pageRequests = mutableListOf<PageRequest>()
 
-    /**
-     * Get all requests for the current page
-     */
     fun getPageRequests(): List<PageRequest> = pageRequests.toList()
 
-    /**
-     * Clear tracked requests
-     */
     fun clearPageRequests() {
         pageRequests.clear()
     }
@@ -166,42 +151,64 @@ class WebPageClient(
         noopBlocker
     }
 
-    /**
-     * Should be called once when the root HTML page had been loaded.
-     */
     private fun applyDesktopModeIfNeeded(aView: WebView) {
         aView.settings.useWideViewPort = false
-
         if (webPageTab.desktopMode) {
             if (aView.context.configPrefs.desktopWidth != 100F) {
                 aView.settings.useWideViewPort = true
-                Timber.w("evaluateJavascript: desktop mode")
                 aView.evaluateJavascript(setMetaViewport.provideJs().replaceFirst("\$width\$", "${aView.context.configPrefs.desktopWidth}"), null)
             }
         }
     }
 
     /**
-     * Overrides [WebViewClient.shouldInterceptRequest].
+     * 核心拦截关卡：
+     * 无论首次加载、地址栏输入还是重定向，所有网络流量必须经过此处！
+     * 针对未带端口的主文档请求，直接在此同步解析并转向目标非标端口，彻底切断向 80/443 的连接。
      */
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-        Timber.v("$ihs : shouldInterceptRequest - ${if (request.isForMainFrame) "Main frame" else "Resource"} - ${request.url}")
+        val reqUri = request.url
+        val scheme = reqUri.scheme?.lowercase() ?: ""
+
+        // ================= 首次访问强行接管（杜绝首次 ERR_CONNECTION_TIMED_OUT） =================
+        if (request.isForMainFrame && reqUri.port == -1 && (scheme == "http" || scheme == "https")) {
+            val rawUrl = reqUri.toString()
+            // 优先检查内存缓存
+            val cachedUrl = DnsPortResolver.getCachedUrl(rawUrl)
+            if (cachedUrl != null && cachedUrl != rawUrl) {
+                activity.runOnUiThread {
+                    view.stopLoading()
+                    view.loadUrl(cachedUrl)
+                }
+                // 返回空响应，立刻阻断原本向 80/443 的无效连接
+                return WebResourceResponse("text/html", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+            } else {
+                // 首次未命中缓存：同步阻塞等待极速解析结果（毫秒级）
+                val resolvedUrl = runBlocking {
+                    DnsPortResolver.resolveTargetUrl(rawUrl)
+                }
+                if (resolvedUrl != rawUrl) {
+                    activity.runOnUiThread {
+                        view.stopLoading()
+                        view.loadUrl(resolvedUrl)
+                    }
+                    return WebResourceResponse("text/html", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+                }
+            }
+        }
+        // ====================================================================================
 
         val response = adBlock.shouldBlock(request, currentUrl)
         val wasBlocked = response != null
-
         val url = request.url.toString()
 
         if (request.isForMainFrame) {
             if (url.endsWith(".user.js")) {
                 handleUserScriptInstallation(url)
             }
-
             if (webPageTab.targetUrl != request.url) {
-                Timber.i("$ihs : Main frame navigation detected, updating targetUrl: $url")
                 webPageTab.targetUrl = request.url
             }
-
             pageLoadStartTime = System.currentTimeMillis()
             onPageFinishedDone = false
         }
@@ -218,7 +225,6 @@ class WebPageClient(
         if (engine != null) {
             val engineResponse = engine.handleRequest(request)
             if (engineResponse != null) {
-                Timber.v("$ihs : Request handled by ${engine.displayName}: ${request.url}")
                 return engineResponse
             }
         }
@@ -226,14 +232,10 @@ class WebPageClient(
         return null
     }
 
-    /**
-     * Reset location permissions for current domain if Android location permission is missing.
-     */
     fun resetLocationPermissionIfNeeded() {
         if (domainPreferences.isDefault) {
             return
         }
-
         val hasLocationPermission = PermissionsManager.getInstance().hasPermission(
             activity,
             android.Manifest.permission.ACCESS_FINE_LOCATION
@@ -241,7 +243,6 @@ class WebPageClient(
             activity,
             android.Manifest.permission.ACCESS_COARSE_LOCATION
         )
-
         if (!hasLocationPermission) {
             domainPreferences.hasLocationPermission {
                 if (it) {
@@ -251,26 +252,17 @@ class WebPageClient(
         }
     }
 
-    /**
-     * Overrides [WebViewClient.onLoadResource]
-     */
     override fun onLoadResource(view: WebView, url: String?) {
         super.onLoadResource(view, url)
-
         val isForMainFrame = webPageTab.targetUrl.toString() == url
         if (isForMainFrame) {
             iResourceCount = 0
             clearPageRequests()
             webPageTab.clearConsoleMessages()
         }
-
         iResourceCount++
-        Timber.d("$ihs : onLoadResource - ${if (isForMainFrame) "Main frame" else "Resource"} - $iResourceCount - $url")
     }
 
-    /**
-     * 地址栏净化：更新给界面的 URL 自动过滤掉非标端口，只显示干净域名
-     */
     fun updateUrlIfNeeded(url: String) {
         val cleanUrl = DnsPortResolver.cleanUrlForDisplay(url)
         if (webPageTab.lastUrl != cleanUrl) {
@@ -279,14 +271,8 @@ class WebPageClient(
         }
     }
 
-    /**
-     * Overrides [WebViewClient.onPageFinished].
-     */
     override fun onPageFinished(view: WebView, url: String) {
-        val pageLoadDuration = System.currentTimeMillis() - pageLoadStartTime
         val skip = onPageFinishedDone || view.progress != 100
-        Timber.i("$ihs : onPageFinished ${if (skip) "- skipping -" else "-"} Shown: ${view.isShown} - Progress: ${view.progress} - $url - Load time: ${pageLoadDuration}ms - Resources: $iResourceCount")
-
         updateUrlIfNeeded(url)
 
         if (skip) {
@@ -315,7 +301,6 @@ class WebPageClient(
             view.title?.let { webPageTab.titleInfo.setTitle(it) }
         }
         if (webPageTab.invertPage) {
-            Timber.w("evaluateJavascript: invert page colors")
             view.evaluateJavascript(invertPageJs.provideJs(), null)
         }
 
@@ -328,42 +313,24 @@ class WebPageClient(
         if (userPreferences.extensionsEnabled) {
             val scriptCode = userScriptManager.getInjectionCode(url, fulguris.userscript.RunAt.DOCUMENT_END)
             if (scriptCode != null) {
-                Timber.d("Injecting DOCUMENT_END userscripts for $url")
                 view.evaluateJavascript(scriptCode, null)
             }
-
             val idleScriptCode = userScriptManager.getInjectionCode(url, fulguris.userscript.RunAt.DOCUMENT_IDLE)
             if (idleScriptCode != null) {
                 view.postDelayed({
-                    Timber.d("Injecting DOCUMENT_IDLE userscripts for $url")
                     view.evaluateJavascript(idleScriptCode, null)
                 }, 3000)
             }
         }
 
         webBrowser.onTabChanged(webPageTab)
-
-        if (userPreferences.isLog(LogLevel.VERBOSE)) {
-            val cookies = CookieManager.getInstance().getCookie(url)?.split(';')
-            Timber.v("Cookies count: ${cookies?.count()}")
-            cookies?.forEach {
-                Timber.v(it.trim())
-            }
-        }
     }
 
-    /**
-     * Overrides [WebViewClient.onPageStarted]
-     */
     @SuppressLint("SetJavaScriptEnabled")
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-        Timber.i("$ihs : onPageStarted - $url")
-
         onPageFinishedDone = false
         webPageTab.isLoading = true
-
         currentUrl = url
-
         updateUrlIfNeeded(url)
 
         val uri = url.toUri()
@@ -374,7 +341,6 @@ class WebPageClient(
         if (userPreferences.extensionsEnabled) {
             val scriptCode = userScriptManager.getInjectionCode(url, fulguris.userscript.RunAt.DOCUMENT_START)
             if (scriptCode != null) {
-                Timber.d("Injecting DOCUMENT_START userscripts for $url")
                 view.evaluateJavascript(scriptCode, null)
             }
         }
@@ -383,11 +349,9 @@ class WebPageClient(
             if (!darkModeBypassDomainSettings) {
                 darkMode = domainPreferences.darkMode
             }
-
             if (!desktopModeBypassDomainSettings) {
                 desktopMode = domainPreferences.desktopMode
             }
-
             if (domainPreferences.javaScriptEnabled) {
                 view.settings.javaScriptEnabled = true
                 view.settings.javaScriptCanOpenWindowsAutomatically = true
@@ -420,7 +384,6 @@ class WebPageClient(
     }
 
     override fun onReceivedClientCertRequest(view: WebView?, request: ClientCertRequest?) {
-        Timber.d("$ihs : onReceivedClientCertRequest")
         super.onReceivedClientCertRequest(view, request)
     }
 
@@ -430,16 +393,13 @@ class WebPageClient(
         host: String,
         realm: String
     ) {
-        Timber.d("$ihs : onReceivedHttpAuthRequest")
         MaterialAlertDialogBuilder(activity).apply {
             val dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_auth_request, null)
-
             val realmLabel = dialogView.findViewById<TextView>(R.id.auth_request_realm_textview)
             val name = dialogView.findViewById<EditText>(R.id.auth_request_username_edittext)
             val password = dialogView.findViewById<EditText>(R.id.auth_request_password_edittext)
 
             realmLabel.text = activity.getString(R.string.label_realm, realm)
-
             setView(dialogView)
             setTitle(R.string.title_sign_in)
             setCancelable(true)
@@ -447,7 +407,6 @@ class WebPageClient(
                 val user = name.text.toString()
                 val pass = password.text.toString()
                 handler.proceed(user.trim(), pass.trim())
-                Timber.i("Attempting HTTP Authentication")
             }
             setNegativeButton(R.string.action_cancel) { _, _ ->
                 handler.cancel()
@@ -456,18 +415,11 @@ class WebPageClient(
     }
 
     override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            Timber.w("$ihs : onReceivedError (modern): ${request?.url} - Code: ${error?.errorCode} - ${error?.description}")
-        } else {
-            Timber.w("$ihs : onReceivedError (modern): ${request?.url}")
-        }
         super.onReceivedError(view, request, error)
     }
 
     @Deprecated("Deprecated in Java")
     override fun onReceivedError(webview: WebView, errorCode: Int, error: String, failingUrl: String) {
-        Timber.e("onReceivedError: ${domainPreferences.domain}")
-
         val output = ByteArrayOutputStream()
         val bitmap = activity.getDrawable(R.drawable.ic_about, android.R.attr.state_enabled).toBitmap()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
@@ -483,20 +435,16 @@ class WebPageClient(
         })()"""
 
         Thread.sleep(100)
-        Timber.w("evaluateJavascript: error page theming")
         webview.evaluateJavascript(script) {}
     }
 
     override fun onScaleChanged(view: WebView, oldScale: Float, newScale: Float) {
-        Timber.d("$ihs : onScaleChanged")
         if (view.isShown && webPageTab.userPreferences.textReflowEnabled) {
-            if (isRunning)
-                return
+            if (isRunning) return
             val changeInPercent = abs(100 - 100 / zoomScale * newScale)
             if (changeInPercent > 2.5f && !isRunning) {
                 isRunning = view.postDelayed({
                     zoomScale = newScale
-                    Timber.w("evaluateJavascript: text reflow")
                     view.evaluateJavascript(textReflowJs.provideJs()) { isRunning = false }
                 }, 100)
             }
@@ -505,10 +453,6 @@ class WebPageClient(
 
     @SuppressLint("WebViewClientOnReceivedSslError")
     override fun onReceivedSslError(webView: WebView, handler: SslErrorHandler, error: SslError) {
-        Timber.d("$ihs : onReceivedSslError")
-        Timber.e("WebView URL: ${webView.url}")
-        Timber.e("SSL error URL: ${error.url}")
-
         if (!sslErrorUrls.contains(error.url)) {
             sslErrorUrls.add(error.url)
         }
@@ -567,13 +511,10 @@ class WebPageClient(
         if (!domainPreferences.isDefault) {
             domainPreferences.sslErrorOverride = true
             domainPreferences.sslErrorLocal = aSslError
-        } else {
-            Timber.w("Domain settings should have been loaded already")
         }
     }
 
     override fun onFormResubmission(view: WebView, dontResend: Message, resend: Message) {
-        Timber.d("$ihs : onFormResubmission")
         MaterialAlertDialogBuilder(activity).apply {
             setTitle(activity.getString(R.string.title_form_resubmission))
             setMessage(activity.getString(R.string.message_form_resubmission))
@@ -592,38 +533,22 @@ class WebPageClient(
 
     private fun loadDomainPreferences(aHost: String, aEntryPoint: Boolean = false) {
         if (domainPreferences.domain == aHost) {
-            Timber.v("$ihs : loadDomainPreferences: already loaded")
             return
         }
-
-        Timber.d("$ihs : loadDomainPreferences for $aHost")
         domainPreferences = DomainPreferences(app, aHost)
     }
 
     private var debounceLaunch: Runnable? = null
 
     /**
-     * 核心拦截与放行逻辑：
-     * 1. 凡是已由 WebPageTab 换装了非标端口的请求，直接放行直连；
-     * 2. 网页内部超链接或重定向若遇到命中缓存的非标端口域名，瞬间以目标端口加载，杜绝跌落回 80/443；
-     * 3. 避免二次异步竞争与中断。
+     * 放行页面内正常跳转，避免与 shouldInterceptRequest 产生二次竞争
      */
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-        Timber.i("$ihs : shouldOverrideUrlLoading - ${request.url}")
-
         val url = request.url.toString()
         val uri = request.url
 
-        // 如果已经携带了端口，直接放行直连
         if (uri.port != -1) {
             return false
-        }
-
-        // 检查当前访问的 URL 是否已在 DNS 缓存中命中非标端口；若命中则以重写后的 URL 加载，防止重定向回落到 80/443
-        val cachedUrl = DnsPortResolver.getCachedUrl(url)
-        if (cachedUrl != null && cachedUrl != url) {
-            view.loadUrl(cachedUrl)
-            return true
         }
 
         val headers = webPageTab.requestHeaders
@@ -641,18 +566,14 @@ class WebPageClient(
         if (intent != null) {
             if (webPageTab.isForeground) {
                 var appLaunched = false
-
                 if (debounceLaunch == null) {
                     appLaunched = launchAppIfNeeded(view, intent)
                 }
                 view.removeCallbacks(debounceLaunch)
-                debounceLaunch = Runnable {
-                    debounceLaunch = null
-                }
+                debounceLaunch = Runnable { debounceLaunch = null }
                 view.postDelayed(debounceLaunch, 1000)
 
                 if (appLaunched) {
-                    Timber.d("$ihs : Override loading after app launch")
                     view.stopLoading()
                     if (activity is WebBrowserActivity) {
                         activity.closeCurrentTabIfEmpty()
@@ -666,20 +587,10 @@ class WebPageClient(
     }
 
     private fun launchAppIfNeeded(view: WebView, intent: Intent): Boolean {
-        Timber.d("$ihs : launchAppIfNeeded: $intent")
-
         when (domainPreferences.launchApp) {
-            NoYesAsk.YES -> {
-                Timber.d("$ihs : Launch app - YES")
-                return activity.startActivityWithFallback(view, intent, false)
-            }
-            NoYesAsk.NO -> {
-                Timber.d("$ihs : Launch app - NO")
-                return false
-            }
+            NoYesAsk.YES -> return activity.startActivityWithFallback(view, intent, false)
+            NoYesAsk.NO -> return false
             NoYesAsk.ASK -> {
-                Timber.d("$ihs : Launch app - ASK")
-
                 if (appLaunchDialog == null) {
                     val packageManager = activity.packageManager
                     val allResolveInfos = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
@@ -687,11 +598,9 @@ class WebPageClient(
                     val specializedApps = allResolveInfos.filter { info ->
                         info.filter?.isSpecializedFor(url) ?: false
                     }
-
                     val resolveInfos = if (specializedApps.isNotEmpty()) specializedApps else allResolveInfos
 
                     if (resolveInfos.isEmpty()) {
-                        Timber.w("No apps found to handle intent")
                         return activity.startActivityWithFallback(view, intent, true)
                     }
 
@@ -706,11 +615,8 @@ class WebPageClient(
                         dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_app_launch, null)
                         dialogView.findViewById<android.widget.ImageView>(R.id.app_icon)?.setImageDrawable(appIcon)
                         dialogView.findViewById<TextView>(R.id.app_label)?.text = appLabel
-
-                        Timber.d("$ihs : Single app: $appLabel")
                     } else {
                         dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_with_checkbox, null)
-                        Timber.d("$ihs : Multiple apps available (${resolveInfos.size})")
                     }
 
                     val checkboxView = dialogView.findViewById<CheckBox>(R.id.checkBoxDontAskAgain)
@@ -723,7 +629,6 @@ class WebPageClient(
                             if (checkboxView.isChecked) {
                                 domainPreferences.launchAppOverride = true
                                 domainPreferences.launchAppLocal = NoYesAsk.YES
-                                Timber.d("$ihs : Saved preference: Launch app = YES for domain ${domainPreferences.domain}")
                             }
                             activity.startActivityWithFallback(view, intent, false)
                             appLaunchDialog = null
@@ -732,7 +637,6 @@ class WebPageClient(
                             if (checkboxView.isChecked) {
                                 domainPreferences.launchAppOverride = true
                                 domainPreferences.launchAppLocal = NoYesAsk.NO
-                                Timber.d("$ihs : Saved preference: Launch app = NO for domain ${domainPreferences.domain}")
                             }
                             activity.startActivityWithFallback(view, intent, true)
                             appLaunchDialog = null
@@ -746,8 +650,6 @@ class WebPageClient(
     }
 
     private fun shouldStopUrlLoading(webView: WebView, url: String, headers: Map<String, String>, aSkipErrorPage: Boolean = true): Boolean {
-        Timber.d("$ihs : shouldStopUrlLoading")
-
         if (!URLUtil.isNetworkUrl(url)
             && !URLUtil.isFileUrl(url)
             && !URLUtil.isAboutUrl(url)
@@ -755,22 +657,18 @@ class WebPageClient(
             && !URLUtil.isJavaScriptUrl(url)
         ) {
             webView.stopLoading()
-            Timber.w("$ihs : Stop loading unsupported scheme: $url")
             return true
         }
         return when {
             headers.isEmpty() -> false
             else -> {
                 webView.loadUrl(url, headers)
-                Timber.w("$ihs : Load URL with headers")
                 true
             }
         }
     }
 
     private fun handleUserScriptInstallation(url: String) {
-        Timber.i("$ihs : Detected userscript URL: $url")
-
         CoroutineScope(Dispatchers.IO).coroutineLaunch {
             try {
                 val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
@@ -779,7 +677,6 @@ class WebPageClient(
 
                 if (connection.responseCode == java.net.HttpURLConnection.HTTP_OK) {
                     val scriptContent = connection.inputStream.bufferedReader().use { it.readText() }
-
                     withContext(Dispatchers.Main) {
                         showUserScriptInstallDialog(scriptContent)
                     }
@@ -789,7 +686,6 @@ class WebPageClient(
                     }
                 }
             } catch (e: Exception) {
-                Timber.e(e, "Failed to download userscript")
                 withContext(Dispatchers.Main) {
                     activity.makeSnackbar(activity.getString(R.string.error_downloading_userscript), KDuration, Gravity.BOTTOM).show()
                 }
@@ -814,7 +710,6 @@ class WebPageClient(
                 setNegativeButton(R.string.action_cancel, null)
             }.launch()
         } catch (e: Exception) {
-            Timber.e(e, "Failed to parse userscript")
             activity.makeSnackbar(activity.getString(R.string.error_parsing_userscript), KDuration, Gravity.BOTTOM).show()
         }
     }
@@ -835,84 +730,53 @@ class WebPageClient(
                 activity.startActivity(intent)
             }
             snackbar.show()
-            Timber.i("Userscript installed: $scriptName")
         } else {
             activity.makeSnackbar(activity.getString(R.string.error_installing_userscript), KDuration, Gravity.BOTTOM).show()
-            Timber.e("Failed to install userscript: $scriptName")
         }
     }
 
     private fun getAllSslErrorMessageCodes(error: SslError): List<Int> {
         val errorCodeMessageCodes = ArrayList<Int>(1)
-
-        if (error.hasError(SslError.SSL_DATE_INVALID)) {
-            errorCodeMessageCodes.add(R.string.message_certificate_date_invalid)
-        }
-        if (error.hasError(SslError.SSL_EXPIRED)) {
-            errorCodeMessageCodes.add(R.string.message_certificate_expired)
-        }
-        if (error.hasError(SslError.SSL_IDMISMATCH)) {
-            errorCodeMessageCodes.add(R.string.message_certificate_domain_mismatch)
-        }
-        if (error.hasError(SslError.SSL_NOTYETVALID)) {
-            errorCodeMessageCodes.add(R.string.message_certificate_not_yet_valid)
-        }
-        if (error.hasError(SslError.SSL_UNTRUSTED)) {
-            errorCodeMessageCodes.add(R.string.message_certificate_untrusted)
-        }
-        if (error.hasError(SslError.SSL_INVALID)) {
-            errorCodeMessageCodes.add(R.string.message_certificate_invalid)
-        }
-
-        if (BuildConfig.DEBUG) {
-            errorCodeMessageCodes.add(R.string.message_certificate_invalid)
-        }
-
+        if (error.hasError(SslError.SSL_DATE_INVALID)) errorCodeMessageCodes.add(R.string.message_certificate_date_invalid)
+        if (error.hasError(SslError.SSL_EXPIRED)) errorCodeMessageCodes.add(R.string.message_certificate_expired)
+        if (error.hasError(SslError.SSL_IDMISMATCH)) errorCodeMessageCodes.add(R.string.message_certificate_domain_mismatch)
+        if (error.hasError(SslError.SSL_NOTYETVALID)) errorCodeMessageCodes.add(R.string.message_certificate_not_yet_valid)
+        if (error.hasError(SslError.SSL_UNTRUSTED)) errorCodeMessageCodes.add(R.string.message_certificate_untrusted)
+        if (error.hasError(SslError.SSL_INVALID)) errorCodeMessageCodes.add(R.string.message_certificate_invalid)
+        if (BuildConfig.DEBUG) errorCodeMessageCodes.add(R.string.message_certificate_invalid)
         return errorCodeMessageCodes
     }
 
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-        Timber.e("onRenderProcessGone")
         return webPageTab.onRenderProcessGone(view, detail)
     }
 
     override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
-        Timber.d("$ihs : doUpdateVisitedHistory: $isReload - $url - ${view.url}")
         super.doUpdateVisitedHistory(view, url, isReload)
         updateUrlIfNeeded(url)
     }
 
-    override fun onReceivedHttpError(
-        view: WebView?,
-        request: WebResourceRequest?,
-        errorResponse: WebResourceResponse?
-    ) {
-        Timber.w("$ihs : onReceivedHttpError: ${request?.url} - Status: ${errorResponse?.statusCode}")
+    override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
         super.onReceivedHttpError(view, request, errorResponse)
     }
 
     override fun onPageCommitVisible(view: WebView?, url: String?) {
-        Timber.d("$ihs : onPageCommitVisible: $url")
         super.onPageCommitVisible(view, url)
     }
 
     override fun shouldOverrideKeyEvent(view: WebView?, event: KeyEvent?): Boolean {
-        Timber.d("$ihs : shouldOverrideKeyEvent: $event")
         return super.shouldOverrideKeyEvent(view, event)
     }
 
     override fun onUnhandledKeyEvent(view: WebView?, event: KeyEvent?) {
-        Timber.d("$ihs : onUnhandledKeyEvent: $event")
         super.onUnhandledKeyEvent(view, event)
     }
 
     override fun onReceivedLoginRequest(view: WebView?, realm: String?, account: String?, args: String?) {
-        Timber.d("$ihs : onReceivedLoginRequest: $realm")
         super.onReceivedLoginRequest(view, realm, account, args)
     }
 
     override fun onSafeBrowsingHit(view: WebView?, request: WebResourceRequest?, threatType: Int, callback: SafeBrowsingResponse?) {
-        Timber.d("$ihs : onSafeBrowsingHit: $threatType")
         super.onSafeBrowsingHit(view, request, threatType, callback)
     }
 }
