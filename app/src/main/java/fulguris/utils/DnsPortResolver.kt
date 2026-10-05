@@ -19,24 +19,66 @@ object DnsPortResolver {
     private val portCache = ConcurrentHashMap<String, Int>()
 
     /**
-     * 极速同步获取缓存中已重写的 URL（已缓存非标端口则 0ms 返回，标准端口或未缓存返回 null）
+     * 判断当前 URL 的端口是否已经记录在 DNS 接管缓存中
+     */
+    fun isCached(rawUrl: String): Boolean {
+        val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return false }
+        val host = uri.host?.lowercase() ?: return false
+        val scheme = uri.scheme?.lowercase() ?: "http"
+        val port = uri.port
+        return portCache["$scheme:$host"] == port
+    }
+
+    /**
+     * 后台静默验证：针对从历史记录恢复的带端口 URL，向 DNS 验证该端口是否为专属接管端口。
+     * 如果是，将其加入缓存并返回 true。
+     */
+    suspend fun verifyAndCachePort(rawUrl: String): Boolean = withContext(Dispatchers.IO) {
+        val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return@withContext false }
+        val host = uri.host?.lowercase() ?: return@withContext false
+        val scheme = uri.scheme?.lowercase() ?: "http"
+        val port = uri.port
+        
+        if (port == -1) return@withContext false
+        if (portCache["$scheme:$host"] == port) return@withContext true
+        
+        var targetPort: Int? = null
+        if (scheme == "https") {
+            targetPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
+        } else {
+            targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
+            if (targetPort == null) {
+                val httpsPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
+                if (httpsPort != null && httpsPort == port) {
+                    portCache["https:$host"] = port
+                    return@withContext true
+                }
+            }
+        }
+        
+        if (targetPort != null && targetPort == port) {
+            portCache["$scheme:$host"] = port
+            return@withContext true
+        }
+        return@withContext false
+    }
+
+    /**
+     * 极速同步获取缓存中已重写的 URL
      */
     fun getCachedUrl(rawUrl: String): String? {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return null }
         val host = uri.host?.lowercase() ?: return null
         val scheme = uri.scheme?.lowercase() ?: "http"
 
-        // 已经带有端口或非 http/https 协议，直接放行
         if (uri.port != -1 || (scheme != "http" && scheme != "https")) return null
 
         val targetPort = portCache["$scheme:$host"] ?: return null
 
-        // 标准 80 / 443 放行原生请求
         if ((scheme == "http" && targetPort == 80) || (scheme == "https" && targetPort == 443)) {
             return null
         }
 
-        // 防火墙：严禁 https 挂 802 明文端口
         if (scheme == "https" && targetPort == 802) {
             return null
         }
@@ -48,7 +90,7 @@ object DnsPortResolver {
     }
 
     /**
-     * 核心全动态解析入口：区分普通网站（80/443）与非标端口网站
+     * 核心全动态解析入口
      */
     suspend fun resolveTargetUrl(rawUrl: String): String = withContext(Dispatchers.IO) {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return@withContext rawUrl }
@@ -67,22 +109,15 @@ object DnsPortResolver {
         var targetPort: Int? = null
 
         if (scheme == "https") {
-            // HTTPS 查询 Type 65 (RFC 9460 HTTPS 记录)
             targetPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
-
             if (targetPort != null && targetPort in 1..65535 && targetPort != 443) {
-                // 仅当明确解析到有效的非标 HTTPS 端口时记录
                 portCache["https:$host"] = targetPort
             } else {
-                // 未配置非标端口：标准 HTTPS 网站，记录 443 并放行
                 portCache["https:$host"] = 443
                 return@withContext rawUrl
             }
         } else {
-            // HTTP 查询 Type 64 (RFC 9460 SVCB 记录)
             targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
-
-            // 若 HTTP 未配置，探测是否配置了 HTTPS 非标端口记录
             if (targetPort == null) {
                 val httpsPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
                 if (httpsPort != null && httpsPort in 1..65535 && httpsPort != 443 && httpsPort != 802) {
@@ -97,7 +132,6 @@ object DnsPortResolver {
             if (targetPort != null && targetPort in 1..65535 && targetPort != 80) {
                 portCache["http:$host"] = targetPort
             } else {
-                // 未配置非标端口：标准 HTTP 网站，记录 80 并放行
                 portCache["http:$host"] = 80
                 return@withContext rawUrl
             }
@@ -109,9 +143,6 @@ object DnsPortResolver {
         return@withContext "$scheme://$host:$targetPort$path$query$fragment"
     }
 
-    /**
-     * 原生 UDP 53 数据包探测
-     */
     private fun queryUdpDnsPort(domain: String, qtype: Int): Int? {
         var socket: DatagramSocket? = null
         try {
@@ -168,9 +199,6 @@ object DnsPortResolver {
         return null
     }
 
-    /**
-     * DoH 备用通道探测
-     */
     private fun queryDohPort(domain: String): Int? {
         return try {
             val url = URL("https://1.1.1.1/dns-query?name=$domain&type=HTTPS")
@@ -234,7 +262,7 @@ object DnsPortResolver {
             return url.replaceFirst(Regex(""":$port(?=[/?#]|$)"""), "")
         }
 
-        // 3. 其他情况（即用户手动输入的非接管端口），保留原样显示
+        // 3. 其他情况（即用户手动输入的非接管端口或尚未缓存），保留原样显示
         return url
     }
 }
