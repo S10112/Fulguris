@@ -15,14 +15,12 @@ import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 
 object DnsPortResolver {
+    // 动态内存映射缓存："$scheme:$host" -> 目标端口（纯动态解析后写入，零预设）
     private val portCache = ConcurrentHashMap<String, Int>()
 
-    init {
-        // 本地保底基准规则（0ms 兜底，防止极端无网或 DNS 污染时超时）
-        portCache["http:g.6z.ee"] = 802
-        portCache["https:g.6z.ee"] = 803
-    }
-
+    /**
+     * 极速同步获取缓存中已重写的 URL（已缓存则 0ms 返回，未缓存返回 null）
+     */
     fun getCachedUrl(rawUrl: String): String? {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return null }
         val host = uri.host?.lowercase() ?: return null
@@ -30,29 +28,25 @@ object DnsPortResolver {
 
         if (uri.port != -1 || (scheme != "http" && scheme != "https")) return null
 
-        var targetScheme = scheme
-        var targetPort = portCache["$scheme:$host"]
+        val targetPort = portCache["$scheme:$host"] ?: return null
 
-        if (targetPort == null && scheme == "http") {
-            val httpsPort = portCache["https:$host"]
-            if (httpsPort != null && httpsPort != 443) {
-                targetScheme = "https"
-                targetPort = httpsPort
-            }
-        }
-
-        if (targetPort == null) return null
-
-        if ((targetScheme == "http" && targetPort == 80) || (targetScheme == "https" && targetPort == 443)) {
+        // 标准 80 / 443 原样放行
+        if ((scheme == "http" && targetPort == 80) || (scheme == "https" && targetPort == 443)) {
             return rawUrl
         }
+
+        // 协议端口一致性校验：避免 https 连非 SSL 端口
+        if (scheme == "https" && targetPort == 802) return null
 
         val path = uri.encodedPath ?: ""
         val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
         val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
-        return "$targetScheme://$host:$targetPort$path$query$fragment"
+        return "$scheme://$host:$targetPort$path$query$fragment"
     }
 
+    /**
+     * 核心全动态解析入口：零硬编码，适用于任意配置了 RFC 9460 记录的域名
+     */
     suspend fun resolveTargetUrl(rawUrl: String): String = withContext(Dispatchers.IO) {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return@withContext rawUrl }
         val host = uri.host?.lowercase() ?: return@withContext rawUrl
@@ -69,34 +63,40 @@ object DnsPortResolver {
 
         var targetPort: Int? = null
 
-        // 通道 1：UDP 探测 Type 65 (HTTPS) 记录
-        targetPort = queryUdpDnsPort(host, 65)
-
-        // 通道 2：UDP 探测 Type 64 (SVCB) 记录
-        if (targetPort == null && scheme == "http") {
-            targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
-        }
-
-        // 通道 3：DoH 接口兜底探测 (向 Cloudflare 权威节点直接获取 JSON)
-        if (targetPort == null) {
-            targetPort = queryDohPort(host)
-        }
-
-        if (targetPort != null && targetPort > 0) {
-            portCache["$scheme:$host"] = targetPort
-            if (scheme == "http" && targetPort == 803) {
-                // 如果只配了 803，自动将 HTTP 升级至 HTTPS
-                portCache["https:$host"] = 803
-                val path = uri.encodedPath ?: ""
-                val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
-                val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
-                return@withContext "https://$host:803$path$query$fragment"
+        if (scheme == "https") {
+            // HTTPS 查询 Type 65 (RFC 9460 HTTPS 记录)
+            targetPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
+            if (targetPort != null && targetPort > 0) {
+                portCache["https:$host"] = targetPort
+            } else {
+                targetPort = 443
+                portCache["https:$host"] = targetPort
             }
         } else {
-            targetPort = if (scheme == "https") 443 else 80
-            portCache["$scheme:$host"] = targetPort
+            // HTTP 优先查 Type 64 (RFC 9460 SVCB 记录)
+            targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
+
+            // 若 HTTP 未配，探测该域名是否配置了 HTTPS 非标端口（Type 65）
+            if (targetPort == null) {
+                val httpsPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
+                if (httpsPort != null && httpsPort > 0 && httpsPort != 443) {
+                    portCache["https:$host"] = httpsPort
+                    val path = uri.encodedPath ?: ""
+                    val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
+                    val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
+                    return@withContext "https://$host:$httpsPort$path$query$fragment"
+                }
+            }
+
+            if (targetPort != null && targetPort > 0) {
+                portCache["http:$host"] = targetPort
+            } else {
+                targetPort = 80
+                portCache["http:$host"] = targetPort
+            }
         }
 
+        // 普通网站默认 80/443 直接原样放行
         if ((scheme == "http" && targetPort == 80) || (scheme == "https" && targetPort == 443)) {
             return@withContext rawUrl
         }
@@ -107,6 +107,9 @@ object DnsPortResolver {
         return@withContext "$scheme://$host:$targetPort$path$query$fragment"
     }
 
+    /**
+     * 原生 UDP 53 数据包探测
+     */
     private fun queryUdpDnsPort(domain: String, qtype: Int): Int? {
         var socket: DatagramSocket? = null
         try {
@@ -137,7 +140,6 @@ object DnsPortResolver {
             socket = DatagramSocket()
             socket.soTimeout = 600
 
-            // 优先使用 Cloudflare DNS 节点查询
             val dnsServer = InetAddress.getByName("1.1.1.1")
             val sendPacket = DatagramPacket(requestData, requestData.size, dnsServer, 53)
             socket.send(sendPacket)
@@ -164,14 +166,17 @@ object DnsPortResolver {
         return null
     }
 
+    /**
+     * DoH 备用通道探测
+     */
     private fun queryDohPort(domain: String): Int? {
         return try {
             val url = URL("https://1.1.1.1/dns-query?name=$domain&type=HTTPS")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
             conn.setRequestProperty("Accept", "application/dns-json")
-            conn.connectTimeout = 800
-            conn.readTimeout = 800
+            conn.connectTimeout = 700
+            conn.readTimeout = 700
 
             if (conn.responseCode == 200) {
                 val reader = BufferedReader(InputStreamReader(conn.inputStream))
@@ -183,7 +188,6 @@ object DnsPortResolver {
                 if (answers != null) {
                     for (i in 0 until answers.length()) {
                         val data = answers.getJSONObject(i).optString("data")
-                        // 检索 port=xxxx 字段
                         val match = Regex("""port=(\d+)""").find(data)
                         if (match != null) {
                             return match.groupValues[1].toInt()
@@ -197,10 +201,11 @@ object DnsPortResolver {
         }
     }
 
+    /**
+     * 地址栏净化过滤
+     */
     fun cleanUrlForDisplay(url: String): String {
         if (url.isBlank()) return url
-        var cleaned = url.replace(":803", "").replace(":802", "")
-        cleaned = cleaned.replace(Regex(""":(80[0-9]|808[0-9]|80|443)(?=[/?#]|$)"""), "")
-        return cleaned
+        return url.replace(Regex(""":(80[0-9]|808[0-9]|80|443)(?=[/?#]|$)"""), "")
     }
 }
