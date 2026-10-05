@@ -21,6 +21,7 @@ import fulguris.extensions.launch
 import fulguris.extensions.setIcon
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch as coroutineLaunch
 import kotlinx.coroutines.withContext
 import fulguris.html.homepage.HomePageFactory
@@ -170,7 +171,7 @@ class WebPageClient(
                     }
                     return WebResourceResponse("text/html", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 } else {
-                    kotlinx.coroutines.runBlocking {
+                    runBlocking {
                         val resolved = DnsPortResolver.resolveTargetUrl(rawUrl)
                         if (resolved != rawUrl) {
                             activity.runOnUiThread {
@@ -181,10 +182,10 @@ class WebPageClient(
                     }
                 }
             }
-            // 防火墙 3：针对恢复会话、历史记录点击等带有端口的请求，静默验证以更新地址栏状态
+            // 防火墙 3：针对从历史记录、书签或后台恢复的带有端口的请求，静默验证以更新地址栏状态
             else if (reqUri.port != -1 && (scheme == "http" || scheme == "https")) {
                 if (!DnsPortResolver.isCachedAsDefaultPort(rawUrl)) {
-                    kotlinx.coroutines.runBlocking {
+                    runBlocking {
                         if (DnsPortResolver.verifyAndCachePort(rawUrl)) {
                             activity.runOnUiThread {
                                 webPageTab.lastUrl = "" // 强制失效触发 UI 更新
