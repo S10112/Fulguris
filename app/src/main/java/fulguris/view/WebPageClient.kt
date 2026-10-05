@@ -151,17 +151,7 @@ class WebPageClient(
         val rawUrl = reqUri.toString()
 
         if (request.isForMainFrame) {
-            // 防火墙 1：严禁任何 https 带着明文 802 端口发起请求
-            if (scheme == "https" && reqUri.port == 802) {
-                val fixedUrl = rawUrl.replace(":802", ":803")
-                activity.runOnUiThread {
-                    view.stopLoading()
-                    view.loadUrl(fixedUrl)
-                }
-                return WebResourceResponse("text/html", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
-            }
-
-            // 防火墙 2：针对未显式带端口的主文档请求，先查动态端口
+            // 防火墙 1：未带端口的请求，查询并加载对应的非标目标端口
             if (reqUri.port == -1 && (scheme == "http" || scheme == "https")) {
                 val targetUrl = DnsPortResolver.getCachedUrl(rawUrl)
                 if (targetUrl != null && targetUrl != rawUrl) {
@@ -182,14 +172,13 @@ class WebPageClient(
                     }
                 }
             }
-            // 防火墙 3：针对恢复会话、历史记录点击等带有端口的请求，确认默认端口并隐藏
+            // 防火墙 2：针对带端口的会话恢复或跳转，验证并注册默认端口，使地址栏隐去端口
             else if (reqUri.port != -1 && (scheme == "http" || scheme == "https")) {
-                if (!DnsPortResolver.isCachedAsDefaultPort(rawUrl)) {
+                if (!DnsPortResolver.isDefaultPort(rawUrl)) {
                     runBlocking {
                         if (DnsPortResolver.verifyAndCachePort(rawUrl)) {
                             activity.runOnUiThread {
-                                webPageTab.lastUrl = ""
-                                updateUrlIfNeeded(rawUrl)
+                                updateUrlIfNeeded(rawUrl, force = true)
                             }
                         }
                     }
@@ -262,9 +251,9 @@ class WebPageClient(
         iResourceCount++
     }
 
-    fun updateUrlIfNeeded(url: String) {
+    fun updateUrlIfNeeded(url: String, force: Boolean = false) {
         val cleanUrl = DnsPortResolver.cleanUrlForDisplay(url)
-        if (webPageTab.lastUrl != cleanUrl) {
+        if (force || webPageTab.lastUrl != cleanUrl) {
             webPageTab.lastUrl = cleanUrl
             webBrowser.onTabChangedUrl(webPageTab)
         }
@@ -544,12 +533,8 @@ class WebPageClient(
         val uri = request.url
         val scheme = uri.scheme?.lowercase() ?: ""
 
+        // 已经带有端口的请求，直接放行
         if (uri.port != -1) {
-            if (scheme == "https" && uri.port == 802) {
-                val fixedUrl = url.replace(":802", ":803")
-                view.loadUrl(fixedUrl)
-                return true
-            }
             return false
         }
 
