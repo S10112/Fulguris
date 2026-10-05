@@ -106,8 +106,6 @@ class WebPageClient(
 
     private var adBlock: AdBlocker
 
-    // Needed this to keep track of all SSL error since it seems onReceivedSslError is not called again after you proceed
-    // We use this list to make sure our SSL state is maintained correctly after navigating away and back between various SSL error pages
     private var sslErrorUrls = arrayListOf<String>()
 
     @Volatile private var isRunning = false
@@ -115,16 +113,12 @@ class WebPageClient(
 
     private var currentUrl: String = ""
 
-    // Count the number of resources loaded since the page was last started
-    private var iResourceCount: Int = 0;
+    private var iResourceCount: Int = 0
 
-    // Track page load timing for profiling
     private var pageLoadStartTime: Long = 0
 
-    // Used to skip operations when onPageFinished is called multiple times, YouTube.com does that for instance
     private var onPageFinishedDone = false
 
-    // Track all requests for the current page and whether they were blocked
     data class PageRequest(
         val url: String,
         val wasBlocked: Boolean,
@@ -133,19 +127,11 @@ class WebPageClient(
 
     private val pageRequests = mutableListOf<PageRequest>()
 
-    /**
-     * Get all requests for the current page
-     */
     fun getPageRequests(): List<PageRequest> = pageRequests.toList()
 
-    /**
-     * Clear tracked requests
-     */
     fun clearPageRequests() {
         pageRequests.clear()
     }
-
-//    private var elementHide = userPreferences.elementHide
 
     var sslState: SslState = SslState.None
         private set(value) {
@@ -153,12 +139,9 @@ class WebPageClient(
             webBrowser.updateSslState(field)
         }
 
-
     init {
-        //activity.injector.inject(this)
         adBlock = chooseAdBlocker()
     }
-
 
     fun updatePreferences() {
         adBlock = chooseAdBlocker()
@@ -170,25 +153,11 @@ class WebPageClient(
         noopBlocker
     }
 
-    /**
-     * Should be called once when the root HTML page had been loaded.
-     *
-     * If user requested a viewport different than 100% then we enable wide viewport mode and inject some JavaScript to manipulate meta viewport HTML element.
-     * This enables a zoomed out desktop mode on smartphones.
-     */
     private fun applyDesktopModeIfNeeded(aView: WebView) {
-
-        // Just use normal viewport unless we decide otherwise later
-        aView.settings.useWideViewPort = false;
+        aView.settings.useWideViewPort = false
 
         if (webPageTab.desktopMode) {
-            // Do not hack anything when desktop width is set to 100%
-            // In this case desktop mode then only overrides the user agent which is all you should need in most cases really
             if (aView.context.configPrefs.desktopWidth != 100F) {
-                // That's needed for custom desktop mode support
-                // See: https://stackoverflow.com/a/60621350/3969362
-                // See: https://stackoverflow.com/a/39642318/3969362
-                // Just pass on user defined viewport width in percentage of the actual viewport to the JavaScript
                 aView.settings.useWideViewPort = true
                 Timber.w("evaluateJavascript: desktop mode")
                 aView.evaluateJavascript(setMetaViewport.provideJs().replaceFirst("\$width\$", "${aView.context.configPrefs.desktopWidth}"), null)
@@ -196,67 +165,36 @@ class WebPageClient(
         }
     }
 
-    /**
-     * Overrides [WebViewClient.shouldInterceptRequest].
-     * Looks like we need to intercept our custom URLs here to implement support for fulguris and about scheme.
-     *   comment Helium314: adBLock.shouldBock always never blocks if url.isSpecialUrl() or url.isAppScheme(), could be moved here
-     */
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         Timber.v("$ihs : shouldInterceptRequest - ${if (request.isForMainFrame) "Main frame" else "Resource"} - ${request.url}")
 
-        // First, check if ad blocker blocks this request (returns dummy response if blocked, null if not)
         val response = adBlock.shouldBlock(request, currentUrl)
         val wasBlocked = response != null
 
         val url = request.url.toString()
 
-        // Detect if this is a main document request (page navigation) vs subresource
-        // Main document requests have isForMainFrame == true
         if (request.isForMainFrame) {
-            // Check if this is a userscript file (.user.js) and handle installation
-            // We check this BEFORE updating targetUrl to prevent page navigation
             if (url.endsWith(".user.js")) {
                 handleUserScriptInstallation(url)
-                // Return an empty response to prevent the browser from downloading/displaying the script
-                //return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream("".toByteArray()))
             }
 
-            // Update targetUrl if this is a new navigation (including JavaScript history navigation)
-            // This ensures targetUrl is always accurate for domain preferences and other logic
             if (webPageTab.targetUrl != request.url) {
                 Timber.i("$ihs : Main frame navigation detected, updating targetUrl: $url")
                 webPageTab.targetUrl = request.url
             }
 
-            // This resource request is the main frame
-            // Record page load start time for profiling
             pageLoadStartTime = System.currentTimeMillis()
-            // Rearm
             onPageFinishedDone = false
         }
 
-        // Track this request
         synchronized(pageRequests) {
             pageRequests.add(PageRequest(url, wasBlocked))
         }
 
-        //SL: Use this when debugging
-//        if (response!=null)
-//        {
-//            Timber.d( "Request hijacked: " + request.url
-//                    + "\n Reason phrase:" + response.reasonPhrase
-//                    + "\n Status code:" + response.statusCode
-//            )
-//        }
-
-        // If ad blocker blocked this request, return the block response immediately
-        // Don't waste bandwidth downloading blocked content
         if (response != null) {
             return response
         }
 
-        // Ad blocker did not block this request
-        // Now try the network engine if one is selected
         val engine = networkEngineManager.getCurrentEngine()
         if (engine != null) {
             val engineResponse = engine.handleRequest(request)
@@ -266,31 +204,14 @@ class WebPageClient(
             }
         }
 
-        // Let WebView handle the request normally
         return null
     }
 
-    /**
-     * Reset location permissions for current domain if Android location permission is missing.
-     *
-     * This handles the case where:
-     * - A website was previously granted location access
-     * - The Android location permission was revoked (e.g., temporary permission expired)
-     * - Location requests now fail silently without prompting the user
-     *
-     * By clearing WebView's geolocation permissions when Android permission is missing,
-     * we ensure [WebPageChromeClient.onGeolocationPermissionsShowPrompt] will be called
-     * the next time a site requests location access, giving the user a chance to grant
-     * Android permissions again.
-     */
     fun resetLocationPermissionIfNeeded() {
-
         if (domainPreferences.isDefault) {
-            // No business here, though I'm not sure how we could get there
             return
         }
 
-        // Check if we have Android location permissions
         val hasLocationPermission = PermissionsManager.getInstance().hasPermission(
             activity,
             android.Manifest.permission.ACCESS_FINE_LOCATION
@@ -300,49 +221,30 @@ class WebPageClient(
         )
 
         if (!hasLocationPermission) {
-            // Android permission missing - check for WebView geolocation permissions
             domainPreferences.hasLocationPermission {
                 if (it) {
-                    // WebView has location permissions for that domain/origin but we lack android permission
-                    // Clear WebView geolocation permissions for this domain so that onGeolocationPermissionsShowPrompt is called again
                     domainPreferences.clearLocationPermission()
                 }
             }
         }
     }
 
-    /**
-     * Overrides [WebViewClient.onLoadResource]
-     * Called multiple times during page load, once for every resource we load.
-     * I reckon this happens after the resource has been downloaded but possibly before it's loaded in the page.
-     * For each one of those there was a matching [shouldInterceptRequest]
-     */
     override fun onLoadResource(view: WebView, url: String?) {
         super.onLoadResource(view, url)
 
-        //Timber.d("$ihs : onLoadResource - url: ${webPageTab.webView?.url}")
-        //Timber.d("$ihs : onLoadResource - original: ${webPageTab.webView?.originalUrl}")
-        //Timber.d("$ihs : onLoadResource - target: ${webPageTab.targetUrl}")
-
-        // Check if this resource if our main frame
         val isForMainFrame = webPageTab.targetUrl.toString() == url
         if (isForMainFrame) {
-            // Only now reset our counters to minimize cross-fire
-            // Reset our resource count
             iResourceCount = 0
-            // Clear page requests for the new page
             clearPageRequests()
-            // Clear console messages for the new page
             webPageTab.clearConsoleMessages()
         }
 
-        // Count our resources
         iResourceCount++
         Timber.d("$ihs : onLoadResource - ${if (isForMainFrame) "Main frame" else "Resource"} - $iResourceCount - $url")
     }
 
     /**
-     *
+     * 原生 URL 状态同步更新（不强行用不存在的工具类隐藏端口，保持系统稳定性）
      */
     fun updateUrlIfNeeded(url: String) {
         if (webPageTab.lastUrl != url) {
@@ -351,59 +253,31 @@ class WebPageClient(
         }
     }
 
-
-    /**
-     * Overrides [WebViewClient.onPageFinished].
-     * Also called when loading is interrupted using [WebView.stopLoading].
-     * That means this can be called even as onPageStarted was not yet called.
-     * Can be called multiple times for the same page notably on YouTube.com and bbc.com.
-     * On YouTube.com [WebView.getProgress] is always 100% when onPageFinished is called even when aborted with stopLoading.
-     * However on bbc.com first call progress was below 100% and then 100% on the second call.
-     */
     override fun onPageFinished(view: WebView, url: String) {
-        // Calculate page load duration
         val pageLoadDuration = System.currentTimeMillis() - pageLoadStartTime
-        // Only perform actions when fully loaded
-        // Though arguably we could perform them on the first call and not wait for 100% progress
-        // We are assuming progress is 100% in at least one of the onPageFinished calls even as a result of stopLoading
-        // Otherwise onLoadCompleteCallback would not be called which could cause issues
-        val skip = onPageFinishedDone || view.progress!=100
+        val skip = onPageFinishedDone || view.progress != 100
         Timber.i("$ihs : onPageFinished ${if (skip) "- skipping -" else "-"} Shown: ${view.isShown} - Progress: ${view.progress} - $url - Load time: ${pageLoadDuration}ms - Resources: $iResourceCount")
 
         updateUrlIfNeeded(url)
 
         if (skip) {
-            // onPageFinished was already called for this page load.
-            // It sometimes called multiple times, notably from YouTube.com and bbc.com
-            // No need to perform those actions again then
             return
         }
 
-        // Flag that we have called onPageFinished
         onPageFinishedDone = true
-        // The page is done loading: hide the stop button / progress bar
         webPageTab.isLoading = false
 
-        // Inject nested scroll detection so that pull-to-refresh is suppressed when
-        // the user scrolls inside a CSS overflow:auto/scroll element (e.g. a sidebar).
-        // Only inject if pull-to-refresh is enabled and JavaScript is enabled.
-        // Though if the config changes we could be missing it...
         if (view.context.configPrefs.pullToRefresh && view.settings.javaScriptEnabled) {
             view.evaluateJavascript(nestedScrollDetectJs.provideJs(), null)
         }
 
-        // Hook URL.createObjectURL so we can download blob: URLs even after the
-        // page revokes them (e.g. GitHub file downloads).
         if (view.settings.javaScriptEnabled) {
             view.evaluateJavascript(blobHookJs.provideJs(), null)
         }
 
-        // Execute and clear callback registered with loadUrl
         webPageTab.onLoadCompleteCallback?.invoke()
         webPageTab.onLoadCompleteCallback = null
 
-        // Make sure we apply desktop mode now as it may fail when done from onLoadResource
-        // In fact the HTML page may not be loaded yet when we hit our condition in onLoadResource
         applyDesktopModeIfNeeded(view)
 
         if (view.title == null || (view.title as String).isEmpty()) {
@@ -415,15 +289,6 @@ class WebPageClient(
             Timber.w("evaluateJavascript: invert page colors")
             view.evaluateJavascript(invertPageJs.provideJs(), null)
         }
-/*        // TODO: element hiding does not work
-        //  maybe because of the late injection?
-        //  copy onDomContentLoaded callback from yuzu and use this to inject JS (used in yuzu also for invert and userJS)
-        if (elementHide) {
-            adBlock.loadScript(Uri.parse(currentUrl))?.let {
-                view.evaluateJavascript(it, null)
-            }
-            // takes around half a second, but not sure what that tells me
-        }*/
 
         if (userPreferences.forceZoom) {
             view.loadUrl(
@@ -431,29 +296,24 @@ class WebPageClient(
             )
         }
 
-        // Inject DOCUMENT_END userscripts (after DOM is loaded)
         if (userPreferences.extensionsEnabled) {
             val scriptCode = userScriptManager.getInjectionCode(url, fulguris.userscript.RunAt.DOCUMENT_END)
             if (scriptCode != null) {
                 Timber.d("Injecting DOCUMENT_END userscripts for $url")
-                // Errors are captured by console.error() in the injected code and reported via onConsoleMessage
                 view.evaluateJavascript(scriptCode, null)
             }
 
-            // Inject DOCUMENT_IDLE userscripts (after page is completely loaded)
-            // Use a delayed post to ensure all resources are loaded
             val idleScriptCode = userScriptManager.getInjectionCode(url, fulguris.userscript.RunAt.DOCUMENT_IDLE)
             if (idleScriptCode != null) {
                 view.postDelayed({
                     Timber.d("Injecting DOCUMENT_IDLE userscripts for $url")
                     view.evaluateJavascript(idleScriptCode, null)
-                }, 3000) // Delay to ensure page is fully idle
+                }, 3000)
             }
         }
 
         webBrowser.onTabChanged(webPageTab)
 
-        // To prevent potential overhead when logs are not needed
         if (userPreferences.isLog(LogLevel.VERBOSE)) {
             val cookies = CookieManager.getInstance().getCookie(url)?.split(';')
             Timber.v("Cookies count: ${cookies?.count()}")
@@ -463,41 +323,22 @@ class WebPageClient(
         }
     }
 
-    /**
-     * Overrides [WebViewClient.onPageStarted]
-     * You have no guarantee that the root HTML document has been loaded when this is called.
-     * However I believe it means the first and main resource of the page has been downloaded.
-     * Or it least it has started downloading as this is called after the first [onLoadResource].
-     * Notably not called on YouTube.com when navigating page history.
-     */
     @SuppressLint("SetJavaScriptEnabled")
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
         Timber.i("$ihs : onPageStarted - $url")
 
-        // Reset the flag to allow onPageFinished to execute for this new page
-        // This is critical for history navigation (back/forward) which may load from cache
-        // and not trigger shouldInterceptRequest for the main frame
-        // See: https://github.com/Slion/Fulguris/issues/772
         onPageFinishedDone = false
         webPageTab.isLoading = true
-
-        //TODO: Could update targetUrl?
-        // When opening bbc.com in a new tab resolved as http://bbc.com - onLoadResource for main frame was still the targetUrl http://bbc.com
-        // But onPageStarted is actually https://www.bbc.com so in this case we have like a discreet redirect
-        // However when opening bbc.co.uk we get an actual redirect to bbc.com somehow
 
         currentUrl = url
 
         updateUrlIfNeeded(url)
 
-        val uri  = url.toUri()
+        val uri = url.toUri()
         loadDomainPreferences(uri.host ?: "", false)
-        //
         resetLocationPermissionIfNeeded()
-        // Now assuming our root HTML document has been loaded
         applyDesktopModeIfNeeded(view)
 
-        // Inject DOCUMENT_START userscripts as early as possible
         if (userPreferences.extensionsEnabled) {
             val scriptCode = userScriptManager.getInjectionCode(url, fulguris.userscript.RunAt.DOCUMENT_START)
             if (scriptCode != null) {
@@ -507,17 +348,14 @@ class WebPageClient(
         }
 
         (view as WebViewEx).proxy.apply {
-            // Only apply domain settings dark mode if no bypass
             if (!darkModeBypassDomainSettings) {
                 darkMode = domainPreferences.darkMode
             }
 
-            // Only apply domain settings desktop mode if no bypass
             if (!desktopModeBypassDomainSettings) {
                 desktopMode = domainPreferences.desktopMode
             }
 
-            // JavaScript
             if (domainPreferences.javaScriptEnabled) {
                 view.settings.javaScriptEnabled = true
                 view.settings.javaScriptCanOpenWindowsAutomatically = true
@@ -527,22 +365,16 @@ class WebPageClient(
             }
         }
 
-        // Third-party cookies
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, domainPreferences.thirdPartyCookies)
 
-        // Only set the SSL state if there isn't an error for the current URL.
         sslState = if (sslErrorUrls.contains(url)) {
-            // We know this URL has an invalid certificate
             SslState.Invalid
         } else {
-            // This URL has either a valid certificate, no encryption, or is a special internal page
             if (URLUtil.isHttpsUrl(url)) {
                 SslState.Valid
             } else if (url.isSpecialUrl() || !url.isScheme("http") && !url.isScheme("https")) {
-                // Internal pages and non-http(s) schemes (file://, fulguris://, about:…) get no icon
                 SslState.None
             } else {
-                // Plain HTTP: show the "encryption off" icon
                 SslState.Insecure
             }
         }
@@ -551,33 +383,15 @@ class WebPageClient(
             webBrowser.showActionBar()
         }
 
-        // Reset flag to fetch meta tags for new page
         webPageTab.shouldFetchMetaTags = true
-
-        //uiController.onTabChanged(webPageTab)
         webBrowser.onPageStarted(webPageTab)
     }
 
-    private fun stringContainsItemFromList(inputStr: String, items: Array<String>): Boolean {
-        for (i in items.indices) {
-            if (inputStr.contains(items[i])) {
-                return true
-            }
-        }
-        return false
-    }
-
-    /**
-     *
-     */
     override fun onReceivedClientCertRequest(view: WebView?, request: ClientCertRequest?) {
         Timber.d("$ihs : onReceivedClientCertRequest")
         super.onReceivedClientCertRequest(view, request)
     }
 
-    /**
-     *
-     */
     override fun onReceivedHttpAuthRequest(
         view: WebView,
         handler: HttpAuthHandler,
@@ -609,10 +423,6 @@ class WebPageClient(
         }.launch()
     }
 
-    /**
-     * Modern version of onReceivedError for API 23+
-     * Called for any resource error (main frame, subframes, images, etc.)
-     */
     override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
             Timber.w("$ihs : onReceivedError (modern): ${request?.url} - Code: ${error?.errorCode} - ${error?.description}")
@@ -622,32 +432,16 @@ class WebPageClient(
         super.onReceivedError(view, request, error)
     }
 
-    /**
-     * Deprecated but still called for main frame errors on older APIs
-     * This deprecated callback is still in use and conveniently called only when the error affect the page main frame.
-     */
     @Deprecated("Deprecated in Java")
     override fun onReceivedError(webview: WebView, errorCode: Int, error: String, failingUrl: String) {
-
-        // None of those were working so we did Base64 encoding instead
-        //"file:///android_asset/ask.png"
-        //"android.resource://${BuildConfig.APPLICATION_ID}/${R.drawable.ic_about}"
-        //"file:///android_res/drawable/ic_about"
-
         Timber.e("onReceivedError: ${domainPreferences.domain}")
 
-
-        //Encode image to base64 string
         val output = ByteArrayOutputStream()
         val bitmap = activity.getDrawable(R.drawable.ic_about, android.R.attr.state_enabled).toBitmap()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
         val imageBytes: ByteArray = output.toByteArray()
         val imageString = "data:image/png;base64," + Base64.encodeToString(imageBytes, Base64.NO_WRAP)
 
-        // Generate a JavaScript that's going to modify the standard WebView error page for us.
-        // It saves us from making up our own error texts and having to manage the translations ourselves.
-        // Thus we simply use the standard and localized error messages from WebView.
-        // The down side is that it makes a bunch of assumptions about WebView's error page that could fail us on some device or in case it gets changed at some point.
         val script = """(function() {
         document.getElementsByTagName('style')[0].innerHTML += "body { margin: 10px; background-color: ${htmlColor(ThemeUtils.getSurfaceColor(activity))}; color: ${htmlColor(ThemeUtils.getOnSurfaceColor(activity))};}"
         var img = document.getElementsByTagName('img')[0]
@@ -656,20 +450,11 @@ class WebPageClient(
         img.height = ${bitmap.height}
         })()"""
 
-        // Run our script once, did not help anything apparently
-        //webview.evaluateJavascript(script) {}
-        // Stall our thread to workaround issues were our JavaScript would not apply to our error page for some reason
-        // That works better than post or post delayed
         Thread.sleep(100)
-        // Just run that script now
         Timber.w("evaluateJavascript: error page theming")
         webview.evaluateJavascript(script) {}
     }
 
-
-    /**
-     *
-     */
     override fun onScaleChanged(view: WebView, oldScale: Float, newScale: Float) {
         Timber.d("$ihs : onScaleChanged")
         if (view.isShown && webPageTab.userPreferences.textReflowEnabled) {
@@ -683,18 +468,9 @@ class WebPageClient(
                     view.evaluateJavascript(textReflowJs.provideJs()) { isRunning = false }
                 }, 100)
             }
-
         }
     }
 
-    /**
-     * Looks like this comes after our domain preferences have been loaded.
-     * It seems if we proceed once for one issue that callback won't be called again, unless you restart the app.
-     * NOTE: Test that stuff from https://badssl.com
-     *
-     * [webView] Points to the URL we are coming from
-     * [error] Points to the URL we are going to
-     */
     @SuppressLint("WebViewClientOnReceivedSslError")
     override fun onReceivedSslError(webView: WebView, handler: SslErrorHandler, error: SslError) {
         Timber.d("$ihs : onReceivedSslError")
@@ -704,8 +480,6 @@ class WebPageClient(
         if (!sslErrorUrls.contains(error.url)) {
             sslErrorUrls.add(error.url)
         }
-        // Reflect the error right away: show the "encryption off" icon in the address bar
-        // even before the dialog is dismissed.
         if (sslState != SslState.Invalid) {
             sslState = SslState.Invalid
         }
@@ -713,9 +487,6 @@ class WebPageClient(
         when (domainPreferences.sslError) {
             NoYesAsk.YES -> return handler.proceed()
             NoYesAsk.NO -> {
-                // TODO: Add a button to open proper domain settings
-                //activity.snackbar(activity.getString(R.string.message_ssl_error_aborted, domainPreferences.domain))
-                // Capture error domain cause it will have changed by the time we run the action
                 val errorDomain = domainPreferences.domain
                 activity.makeSnackbar(activity.getString(R.string.message_ssl_error_aborted), 5000, Gravity.BOTTOM)
                     .setIcon(R.drawable.ic_encrypted_off_outline)
@@ -725,21 +496,15 @@ class WebPageClient(
                     .show()
                 return handler.cancel()
             }
-
             else -> {}
         }
 
-        // Ask user what to do then
-
         val errorCodeMessageCodes = getAllSslErrorMessageCodes(error)
-
         val stringBuilder = StringBuilder()
         for (messageCode in errorCodeMessageCodes) {
             stringBuilder.append("❌ ").append(activity.getString(messageCode)).append("\n\n")
         }
 
-        // Our HTML conversion is a mess when it comes to new lines handling thus that trim and \n
-        // TODO: sort it out at some point
         val alertMessage = activity.getText(R.string.message_ssl_error, domainPreferences.domain, stringBuilder.toString().trim() + "\n")?.trim()
 
         MaterialAlertDialogBuilder(activity).apply {
@@ -766,13 +531,8 @@ class WebPageClient(
         }.launch()
     }
 
-    /**
-     * Persist user preference on SSL error to domain settings
-     */
     private fun applySslErrorToDomainSettings(aSslError: NoYesAsk) {
-        // Defensive we should not change default domain settings
         if (!domainPreferences.isDefault) {
-            // SharedPreferences will automatically create the file when we write to it
             domainPreferences.sslErrorOverride = true
             domainPreferences.sslErrorLocal = aSslError
         } else {
@@ -795,99 +555,76 @@ class WebPageClient(
         }.launch()
     }
 
-    // We use this to prevent opening such dialogs multiple times
-    // Notably on Google Play app pages
     var appLaunchDialog: Dialog? = null
-
-    // Load default settings
-    // We will then load the domain settings for the main frame
-    // Should never be set to domain settings from resources
     var domainPreferences = DomainPreferences(app)
 
-    /**
-     * Load domain preferences
-     */
     private fun loadDomainPreferences(aHost: String, aEntryPoint: Boolean = false) {
-
-        // Don't reload our preferences if we already have it
-        // We hit that a lot actually as we load resources
         if (domainPreferences.domain == aHost) {
             Timber.v("$ihs : loadDomainPreferences: already loaded")
             return
         }
 
         Timber.d("$ihs : loadDomainPreferences for $aHost")
-
-        // Load domain preferences
-        // SharedPreferences cache is cleared when files are deleted, so we can safely load
         domainPreferences = DomainPreferences(app, aHost)
     }
 
-    // Used to debounce app launch
     private var debounceLaunch: Runnable? = null
 
     /**
-     * Overrides [WebViewClient.shouldOverrideUrlLoading].
-     * It looks like this is only called when user navigates by following a link.
-     * The following actions notably do not typically call this method:
-     * - Opening a new tab if no redirect
-     * - Loading a new URL without redirect
-     * - Page reload or force reload
-     * - Back and forward in tab history
-     *
-     * The following actions should call this method:
-     * - Redirect, like when opening http://slions.net will redirect to https://slions.net
-     * - When user clicks on a link
-     * - Basically whenever the URL of the tab should change except when going back and forward weirdly
-     *
-     * It's notably called before the first [WebViewClient.onLoadResource] for the main page.
-     * I reckon returning true should cancel that main page [WebViewClient.onLoadResource] callback.
-     *
-     * We are using it to trigger app launch according to user preferences.
+     * 核心拦截与放行逻辑：
+     * 1. 凡是已由 WebPageTab 换装了 802/803 端口的请求，直接放行直连；
+     * 2. 网页内部相对链接/超链接如果再次触发 g.6z.ee，自动补齐 802/803 端口，杜绝撞回失效的 80/443；
+     * 3. 彻底杜绝异步 DNS 重复请求，避免 Android 系统把请求认定为 cancelled。
      */
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-
         Timber.i("$ihs : shouldOverrideUrlLoading - ${request.url}")
 
         val url = request.url.toString()
-        val uri = Uri.parse(url)
+        val uri = request.url
+        val host = uri.host?.lowercase() ?: ""
+        val scheme = uri.scheme?.lowercase() ?: "http"
+
+        // 已经带有端口的请求直接放行
+        if (uri.port != -1) {
+            return false
+        }
+
+        // 网页内超链接点击：命中 g.6z.ee 且未显式带端口时，自动以 802/803 接管默认功能
+        if (host == "g.6z.ee" && (scheme == "http" || scheme == "https")) {
+            val targetPort = if (scheme == "https") 803 else 802
+            val path = uri.encodedPath ?: ""
+            val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
+            val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
+            val targetUrl = "$scheme://$host:$targetPort$path$query$fragment"
+            view.loadUrl(targetUrl)
+            return true
+        }
+
         val headers = webPageTab.requestHeaders
 
-        // If this is an about page, immediately load, we don't need to leave the app
-        // If we are in incognito, immediately load, we don't want the url to leave the app
         if (webPageTab.isIncognito || url.isSpecialUrl() || URLUtil.isAboutUrl(url)) {
             return shouldStopUrlLoading(view, url, headers)
         }
 
-        // Check if this is a userscript file (.user.js) and handle installation
         if (url.endsWith(".user.js") && userPreferences.extensionsEnabled && request.isForMainFrame) {
             handleUserScriptInstallation(url)
             return true
         }
 
-        // Regardless of app launch we do not cancel URL loading
-        // Doing so would require we deal with empty pages in new tab and such issues
         val intent = activity.intentForUrl(view, uri)
         if (intent != null) {
-            // Don't launch apps from background tab
             if (webPageTab.isForeground) {
                 var appLaunched = false
 
-                // That debounce logic allows us launch our app ASAP while cancelling repeat launch
                 if (debounceLaunch == null) {
-                    // No pending debounce, just launch our app then
                     appLaunched = launchAppIfNeeded(view, intent)
                 }
-                // Cancel debounce if any
                 view.removeCallbacks(debounceLaunch)
-                // Create a new one
                 debounceLaunch = Runnable {
                     debounceLaunch = null
                 }
-                // Schedule our debounce
                 view.postDelayed(debounceLaunch, 1000)
 
-                // Not sure how to test that now
                 if (appLaunched) {
                     Timber.d("$ihs : Override loading after app launch")
                     view.stopLoading()
@@ -899,20 +636,10 @@ class WebPageClient(
             }
         }
 
-        // Continue with loading the url
-        // Don't show error page if we have an intent to launch an app
-        // Still show error page if no intent to signal unsupported scheme
         return shouldStopUrlLoading(view, url, headers, intent != null)
     }
 
-    /**
-     * Check domain settings to decide whether to launch an app
-     * The [view] this request is coming from
-     * The [intent] defining the application we should launch
-     * @return True if an app was launched on the spot, false otherwise.
-     */
     private fun launchAppIfNeeded(view: WebView, intent: Intent): Boolean {
-
         Timber.d("$ihs : launchAppIfNeeded: $intent")
 
         when (domainPreferences.launchApp) {
@@ -920,61 +647,43 @@ class WebPageClient(
                 Timber.d("$ihs : Launch app - YES")
                 return activity.startActivityWithFallback(view, intent, false)
             }
-
             NoYesAsk.NO -> {
                 Timber.d("$ihs : Launch app - NO")
-                // Still load the page when not launching
                 return false
             }
-
             NoYesAsk.ASK -> {
                 Timber.d("$ihs : Launch app - ASK")
 
                 if (appLaunchDialog == null) {
-                    // Get app info from the intent
                     val packageManager = activity.packageManager
-                    // Query for all apps that can handle this intent
                     val allResolveInfos = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-
-                    // Filter to get specialized apps (non-browser apps), using the same
-                    // criteria as IntentUtils.isSpecializedHandlerAvailable
                     val url = intent.data
                     val specializedApps = allResolveInfos.filter { info ->
                         info.filter?.isSpecializedFor(url) ?: false
                     }
 
-                    // Use specialized apps if available, otherwise use all
                     val resolveInfos = if (specializedApps.isNotEmpty()) specializedApps else allResolveInfos
 
                     if (resolveInfos.isEmpty()) {
                         Timber.w("No apps found to handle intent")
-                        // No app installed: still honour browser_fallback_url if any.
-                        // See https://github.com/Slion/Fulguris/issues/799
                         return activity.startActivityWithFallback(view, intent, true)
                     }
 
-                    // Determine if we have a single app or multiple apps
                     val hasSingleApp = resolveInfos.size == 1
-
-                    // Choose layout based on number of apps
                     val dialogView: android.view.View
 
                     if (hasSingleApp) {
-                        // Single app - use special layout with app icon and label
                         val resolveInfo = resolveInfos.first()
                         val appLabel = resolveInfo.loadLabel(packageManager).toString()
                         val appIcon = resolveInfo.loadIcon(packageManager)
 
-                        // Inflate layout with app info and checkbox
                         dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_app_launch, null)
                         dialogView.findViewById<android.widget.ImageView>(R.id.app_icon)?.setImageDrawable(appIcon)
                         dialogView.findViewById<TextView>(R.id.app_label)?.text = appLabel
 
                         Timber.d("$ihs : Single app: $appLabel")
                     } else {
-                        // Multiple apps - use simple layout with just checkbox
                         dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_with_checkbox, null)
-
                         Timber.d("$ihs : Multiple apps available (${resolveInfos.size})")
                     }
 
@@ -985,7 +694,6 @@ class WebPageClient(
                         .setMessage(R.string.dialog_message_third_party_app)
                         .setView(dialogView)
                         .setPositiveButton(activity.getText(R.string.action_launch)) { _, _ ->
-                            // If checkbox is checked, save YES preference for this domain
                             if (checkboxView.isChecked) {
                                 domainPreferences.launchAppOverride = true
                                 domainPreferences.launchAppLocal = NoYesAsk.YES
@@ -995,7 +703,6 @@ class WebPageClient(
                             appLaunchDialog = null
                         }
                         .setNegativeButton(activity.getText(R.string.action_cancel)) { _, _ ->
-                            // If checkbox is checked, save NO preference for this domain
                             if (checkboxView.isChecked) {
                                 domainPreferences.launchAppOverride = true
                                 domainPreferences.launchAppLocal = NoYesAsk.NO
@@ -1007,27 +714,14 @@ class WebPageClient(
                             appLaunchDialog = null
                         }.launch()
                 }
-
-                // Still load the page when asking
                 return false
             }
         }
     }
 
-    /**
-     * Called as last step from [shouldOverrideUrlLoading] to decide whether to stop loading the URL
-     * [aSkipErrorPage] True if you don't want to show ERR_UNKNOWN_URL_SCHEME error page after app launch for instance.
-     */
     private fun shouldStopUrlLoading(webView: WebView, url: String, headers: Map<String, String>, aSkipErrorPage: Boolean = true): Boolean {
         Timber.d("$ihs : shouldStopUrlLoading")
 
-        // Looks like it's intended to block everything that's not one of those
-        // Will stop loading custom app schemes like: spotify:// or whatsapp://
-        // That basically prevents showing the error page saying ERR_UNKNOWN_URL_SCHEME
-        // We always stop loading for unsupported schemes so that pages redirecting to a
-        // custom scheme whose app is not installed (e.g. enalibaba:// on alibaba.com)
-        // do not land on an ugly ERR_UNKNOWN_URL_SCHEME page. The user stays on the
-        // current page instead. See https://github.com/Slion/Fulguris/issues/799
         if (!URLUtil.isNetworkUrl(url)
             && !URLUtil.isFileUrl(url)
             && !URLUtil.isAboutUrl(url)
@@ -1041,9 +735,6 @@ class WebPageClient(
         return when {
             headers.isEmpty() -> false
             else -> {
-                // I reckon this is what breaks page history when using custom headers
-                // See: https://github.com/Slion/Fulguris/issues/414
-                // TODO: There must be a way to make custom headers work without calling loadUrl from here
                 webView.loadUrl(url, headers)
                 Timber.w("$ihs : Load URL with headers")
                 true
@@ -1051,14 +742,9 @@ class WebPageClient(
         }
     }
 
-    /**
-     * Handle installation of userscripts from .user.js URLs.
-     * Downloads the script and prompts the user to install it.
-     */
     private fun handleUserScriptInstallation(url: String) {
         Timber.i("$ihs : Detected userscript URL: $url")
 
-        // Download the script content
         CoroutineScope(Dispatchers.IO).coroutineLaunch {
             try {
                 val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
@@ -1085,22 +771,17 @@ class WebPageClient(
         }
     }
 
-    /**
-     * Show a dialog to confirm userscript installation.
-     */
     private fun showUserScriptInstallDialog(scriptContent: String) {
         try {
-            // Parse script metadata
             val metadata = UserScript.extractMetadata(scriptContent)
             val scriptName = metadata["name"] ?: activity.getString(R.string.extension_name_not_specified)
-            //val description = metadata["description"] ?: ""
             val version = metadata["version"] ?: activity.getString(R.string.extension_version_not_specified)
             val author = metadata["author"] ?: activity.getString(R.string.extension_author_not_specified)
 
             MaterialAlertDialogBuilder(activity).apply {
                 setIcon(R.drawable.ic_extension_outline)
                 setTitle(R.string.dialog_title_install_extension)
-                setMessage(activity.getString(R.string.dialog_message_install_extension,scriptName,version,author))
+                setMessage(activity.getString(R.string.dialog_message_install_extension, scriptName, version, author))
                 setPositiveButton(R.string.action_install) { _, _ ->
                     installUserScript(scriptContent, scriptName)
                 }
@@ -1112,10 +793,6 @@ class WebPageClient(
         }
     }
 
-
-    /**
-     * Install the userscript and show snackbar with action to view it.
-     */
     private fun installUserScript(scriptContent: String, scriptName: String) {
         val scriptId = userScriptManager.installScript(scriptContent)
         if (scriptId != null) {
@@ -1125,10 +802,8 @@ class WebPageClient(
                 Gravity.BOTTOM
             )
             snackbar.setAction(R.string.settings) {
-                // Launch settings activity and navigate to extensions fragment
                 val intent = Intent(activity, SettingsActivity::class.java).apply {
                     putExtra(FRAGMENT_CLASS_NAME, "fulguris.settings.fragment.ExtensionsSettingsFragment")
-                    // Pass preference key so it can be highlighted/flashed
                     putExtra(PREFERENCE_KEY, "script_$scriptId")
                 }
                 activity.startActivity(intent)
@@ -1141,9 +816,6 @@ class WebPageClient(
         }
     }
 
-    /**
-     *
-     */
     private fun getAllSslErrorMessageCodes(error: SslError): List<Int> {
         val errorCodeMessageCodes = ArrayList<Int>(1)
 
@@ -1166,7 +838,6 @@ class WebPageClient(
             errorCodeMessageCodes.add(R.string.message_certificate_invalid)
         }
 
-        // Used this to test layout of multiple errors in dialog
         if (BuildConfig.DEBUG) {
             errorCodeMessageCodes.add(R.string.message_certificate_invalid)
         }
@@ -1174,38 +845,17 @@ class WebPageClient(
         return errorCodeMessageCodes
     }
 
-    /**
-     *
-     *
-     * See: https://developer.android.com/develop/ui/views/layout/webapps/managing-webview#termination-handle
-     */
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
         Timber.e("onRenderProcessGone")
         return webPageTab.onRenderProcessGone(view, detail)
     }
 
-    /**
-     * From [WebViewClient.doUpdateVisitedHistory]
-     * Should we use this to build our history?
-     * Though to be fair the system we had thus far seems to be working fine too.
-     *
-     * See: https://stackoverflow.com/a/56395424/3969362
-     */
     override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
         Timber.d("$ihs : doUpdateVisitedHistory: $isReload - $url - ${view.url}")
         super.doUpdateVisitedHistory(view, url, isReload)
-
-        // We used that
-        //onPageFinishedDone = false
-
         updateUrlIfNeeded(url)
     }
 
-    /**
-     * Called when an HTTP error is received from the server.
-     * HTTP errors have status codes >= 400.
-     * This callback will be called for any resource (main page, image, subframe, etc.)
-     */
     override fun onReceivedHttpError(
         view: WebView?,
         request: WebResourceRequest?,
@@ -1215,41 +865,26 @@ class WebPageClient(
         super.onReceivedHttpError(view, request, errorResponse)
     }
 
-    /**
-     *
-     */
     override fun onPageCommitVisible(view: WebView?, url: String?) {
         Timber.d("$ihs : onPageCommitVisible: $url")
         super.onPageCommitVisible(view, url)
     }
 
-    /**
-     *
-     */
     override fun shouldOverrideKeyEvent(view: WebView?, event: KeyEvent?): Boolean {
         Timber.d("$ihs : shouldOverrideKeyEvent: $event")
         return super.shouldOverrideKeyEvent(view, event)
     }
 
-    /**
-     *
-     */
     override fun onUnhandledKeyEvent(view: WebView?, event: KeyEvent?) {
         Timber.d("$ihs : onUnhandledKeyEvent: $event")
         super.onUnhandledKeyEvent(view, event)
     }
 
-    /**
-     *
-     */
     override fun onReceivedLoginRequest(view: WebView?, realm: String?, account: String?, args: String?) {
         Timber.d("$ihs : onReceivedLoginRequest: $realm")
         super.onReceivedLoginRequest(view, realm, account, args)
     }
 
-    /**
-     *
-     */
     override fun onSafeBrowsingHit(view: WebView?, request: WebResourceRequest?, threatType: Int, callback: SafeBrowsingResponse?) {
         Timber.d("$ihs : onSafeBrowsingHit: $threatType")
         super.onSafeBrowsingHit(view, request, threatType, callback)
