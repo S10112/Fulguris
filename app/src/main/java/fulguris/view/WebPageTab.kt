@@ -990,37 +990,38 @@ class WebPageTab(
 
     /**
      * 核心加载逻辑：
-     * 针对未带端口的请求先进行极速同步/异步端口预换算，
-     * 杜绝 WebView 盲目跑去连 443 或 80 导致超时！
+     * 1. 敲回车时不盲目向 80/443 发包，彻底解决首次超时问题；
+     * 2. 内存命中时 0ms 瞬间直连；无缓存时异步查询 DNS 识别端口后重写发起连接。
      */
     fun loadUrl(aUrl: String, onLoadComplete: (() -> Unit)? = null) {
         isLoading = true
 
-        val uri = Uri.parse(aUrl)
-        val scheme = uri.scheme?.lowercase()
+        val uri = try { Uri.parse(aUrl) } catch (e: Exception) { Uri.parse("") }
+        val scheme = uri.scheme?.lowercase() ?: ""
 
         if (uri.scheme == Schemes.Fulguris || uri.scheme == Schemes.About) {
             executeInternalLoad(aUrl, onLoadComplete)
             return
         }
 
-        // 针对没有显式端口的普通网页请求
-        if (uri.port == -1 && (scheme == "http" || scheme == "https")) {
-            // 1. 同步预判：有缓存时直接 0ms 单次直达
-            val cachedUrl: String? = DnsPortResolver.getCachedUrl(aUrl)
-            if (cachedUrl != null) {
-                executeInternalLoad(cachedUrl, onLoadComplete)
-                return
-            }
-
-            // 2. 首次回车无缓存时：后台极速探测，拿到目标端口后立即进行单次加载并同步界面状态
-            CoroutineScope(Dispatchers.Main).launch {
-                val resolvedUrl: String = DnsPortResolver.resolveTargetUrl(aUrl)
-                executeInternalLoad(resolvedUrl, onLoadComplete)
-                webBrowser.onTabChangedUrl(this@WebPageTab)
-            }
-        } else {
+        // 已经带有端口或非 http/https 协议，直接放行
+        if (uri.port != -1 || (scheme != "http" && scheme != "https")) {
             executeInternalLoad(aUrl, onLoadComplete)
+            return
+        }
+
+        // 1. 同步预判：内存有缓存时直接 0ms 瞬间直连加载
+        val cachedUrl: String? = DnsPortResolver.getCachedUrl(aUrl)
+        if (cachedUrl != null) {
+            executeInternalLoad(cachedUrl, onLoadComplete)
+            return
+        }
+
+        // 2. 无缓存时：启动协程同步等待解析结果，拿到了才准许 WebView 发起连接，彻底杜绝向 80 裸奔超时！
+        CoroutineScope(Dispatchers.Main).launch {
+            val resolvedUrl: String = DnsPortResolver.resolveTargetUrl(aUrl)
+            executeInternalLoad(resolvedUrl, onLoadComplete)
+            webBrowser.onTabChangedUrl(this@WebPageTab)
         }
     }
 
@@ -1192,7 +1193,7 @@ class WebPageTab(
         private const val HEADER_DNT = "DNT"
         private const val HEADER_SAVEDATA = "Save-Data"
 
-        private val API = Build.VERSION.SDK_INT
+        private val API = Build.VERSION_CODES.LOLLIPOP
         private val SCROLL_UP_THRESHOLD = fulguris.utils.Utils.dpToPx(10f)
         private val SCROLL_DOWN_THRESHOLD = fulguris.utils.Utils.dpToPx(30f)
 
