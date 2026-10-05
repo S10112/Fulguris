@@ -184,8 +184,7 @@ class WebPageClient(
             }
             // 防火墙 3：针对恢复会话、历史记录点击等带有端口的请求，确认默认端口并隐藏
             else if (reqUri.port != -1 && (scheme == "http" || scheme == "https")) {
-                val host = reqUri.host?.lowercase() ?: ""
-                if (!DnsPortResolver.isDefaultPort(scheme, host, reqUri.port)) {
+                if (!DnsPortResolver.isCachedAsDefaultPort(rawUrl)) {
                     runBlocking {
                         if (DnsPortResolver.verifyAndCachePort(rawUrl)) {
                             activity.runOnUiThread {
