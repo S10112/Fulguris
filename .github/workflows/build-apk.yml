@@ -23,33 +23,34 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: 配置 Android SDK 构建工具
-        uses: android-actions/setup-android@v3
-
       - name: 赋予 gradlew 执行权限
         run: chmod +x gradlew
 
       - name: 编译 Release APK
         run: ./gradlew assembleSlionsFullDownloadRelease --stacktrace
 
-      - name: 强制使用 apksigner 执行完整对齐与签名 (修复 -103 解析失败)
+      - name: 使用系统原生 apksigner 执行完整签名 (彻底修复 -103 解析失败)
         run: |
-          # 1. 创建标准签名证书
+          # 1. 创建签名证书
           mkdir -p ~/.android
           keytool -genkey -v -keystore ~/.android/debug.keystore \
             -storepass android -alias androiddebugkey -keypass android \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-          # 2. 找到生成的未签名 APK
+          # 2. 定位生成的未签名 APK
           UNSIGNED_APK=$(find app/build/outputs/apk/slionsFullDownload/release/ -name "*.apk" | head -n 1)
           echo "Found APK: $UNSIGNED_APK"
 
-          # 3. 执行 zipalign 4字节对齐
-          zipalign -v -p 4 "$UNSIGNED_APK" app-aligned.apk
+          # 3. 寻找 GitHub Actions 自带的最新 build-tools 路径
+          BUILD_TOOLS_DIR=$(ls -d $ANDROID_SDK_ROOT/build-tools/* | sort -V | tail -n 1)
+          echo "Using Android Build Tools: $BUILD_TOOLS_DIR"
 
-          # 4. 执行 v1 + v2 + v3 完整强制签名
-          apksigner sign --ks ~/.android/debug.keystore \
+          # 4. 执行 4 字节对齐
+          $BUILD_TOOLS_DIR/zipalign -v -p 4 "$UNSIGNED_APK" app-aligned.apk
+
+          # 5. 执行 v1 + v2 + v3 完整证书签名
+          $BUILD_TOOLS_DIR/apksigner sign --ks ~/.android/debug.keystore \
             --ks-pass pass:android \
             --ks-key-alias androiddebugkey \
             --key-pass pass:android \
@@ -59,8 +60,8 @@ jobs:
             --out Fulguris-Release-Signed.apk \
             app-aligned.apk
 
-          # 5. 校验签名完整性
-          apksigner verify --verbose Fulguris-Release-Signed.apk
+          # 6. 验证签名完整性
+          $BUILD_TOOLS_DIR/apksigner verify --verbose Fulguris-Release-Signed.apk
 
       - name: 提取并上传已签名的正式版 APK
         uses: actions/upload-artifact@v4
