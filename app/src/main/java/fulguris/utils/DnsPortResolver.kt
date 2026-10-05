@@ -50,7 +50,7 @@ object DnsPortResolver {
                 return@withContext true
             }
         } else {
-            var targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
+            val targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
             if (targetPort == null) {
                 val httpsPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
                 if (httpsPort != null && httpsPort == port) {
@@ -250,12 +250,14 @@ object DnsPortResolver {
         
         // 1. 如果是业界绝对标准的 80 或 443，一律隐藏
         if ((scheme == "http" && port == 80) || (scheme == "https" && port == 443)) {
-            return url.replaceFirst(":$port", "")
+            // 使用严格的 Regex 正则替换语法
+            return url.replaceFirst(Regex(""":$port(?=[/?#]|$)"""), "")
         }
 
         // 2. 只要当前端口是我们通过 DNS 动态解析出来的“接管端口”，视同为新默认端口，一律隐藏
         if (isCachedAsDefaultPort(url)) {
-            return url.replaceFirst(":$port", "")
+            // 使用严格的 Regex 正则替换语法
+            return url.replaceFirst(Regex(""":$port(?=[/?#]|$)"""), "")
         }
 
         // 3. 其他情况（用户手动输入的无关非标端口），保留原样显示
