@@ -15,11 +15,29 @@ import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 
 object DnsPortResolver {
-    // 严格按 "scheme:host" 映射专属默认端口，协议绝对隔离
+    // 默认端口映射表：将 DNS 解析出的非标端口直接注册为该域名的“系统默认端口”
+    // 格式: "scheme:host" -> 默认端口号 (例如 "https:j.6z.ee" -> 8641)
     private val defaultPortMap = ConcurrentHashMap<String, Int>()
 
     /**
-     * 判断当前 URL 携带的端口是否属于该域名下的“默认端口”（包括原生 80/443 以及 DNS 专属默认端口）
+     * 获取指定域名在特定协议下的默认端口：
+     * - 如果 DNS 解析出了专属端口，则专属端口即为默认端口；
+     * - 未配置时回退到传统系统默认端口（HTTP = 80, HTTPS = 443）。
+     */
+    fun getDefaultPort(scheme: String, host: String): Int {
+        return defaultPortMap["$scheme:$host"] ?: if (scheme == "https") 443 else 80
+    }
+
+    /**
+     * 判断当前端口是否属于该域名下的“默认端口”（像 80 / 443 一样）
+     */
+    fun isDefaultPort(scheme: String, host: String, port: Int): Boolean {
+        if (port == -1) return true
+        return port == getDefaultPort(scheme, host)
+    }
+
+    /**
+     * 判断指定 rawUrl 是否属于默认端口（用于 WebPageClient 精准调用）
      */
     fun isDefaultPort(rawUrl: String): Boolean {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return true }
@@ -28,16 +46,25 @@ object DnsPortResolver {
 
         val host = uri.host?.lowercase() ?: return true
         val scheme = uri.scheme?.lowercase() ?: "http"
-
-        if (scheme == "http" && port == 80) return true
-        if (scheme == "https" && port == 443) return true
-
-        val mappedPort = defaultPortMap["$scheme:$host"]
-        return mappedPort != null && mappedPort == port
+        return isDefaultPort(scheme, host, port)
     }
 
     /**
-     * 静默验证并记录默认端口
+     * 兼容接口：供 WebPageClient 调用，判断是否已缓存为默认端口
+     */
+    fun isCachedAsDefaultPort(rawUrl: String): Boolean {
+        return isDefaultPort(rawUrl)
+    }
+
+    /**
+     * 注册该域名的专属默认端口
+     */
+    fun setDefaultPort(scheme: String, host: String, port: Int) {
+        defaultPortMap["$scheme:$host"] = port
+    }
+
+    /**
+     * 静默验证并写入缓存：针对历史记录或重启恢复的窗口，后台确认该端口是否为专属默认端口
      */
     suspend fun verifyAndCachePort(rawUrl: String): Boolean = withContext(Dispatchers.IO) {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return@withContext false }
@@ -51,13 +78,20 @@ object DnsPortResolver {
         if (scheme == "https") {
             val targetPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
             if (targetPort != null && targetPort == port) {
-                defaultPortMap["https:$host"] = port
+                setDefaultPort("https", host, port)
                 return@withContext true
             }
         } else {
             val targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
+            if (targetPort == null) {
+                val httpsPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
+                if (httpsPort != null && httpsPort == port) {
+                    setDefaultPort("https", host, port)
+                    return@withContext true
+                }
+            }
             if (targetPort != null && targetPort == port) {
-                defaultPortMap["http:$host"] = port
+                setDefaultPort("http", host, port)
                 return@withContext true
             }
         }
@@ -65,7 +99,7 @@ object DnsPortResolver {
     }
 
     /**
-     * 同步获取缓存的目标请求 URL
+     * 极速同步获取缓存中已重写的网络请求 URL
      */
     fun getCachedUrl(rawUrl: String): String? {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return null }
@@ -80,6 +114,10 @@ object DnsPortResolver {
             return null
         }
 
+        if (scheme == "https" && targetPort == 802) {
+            return null
+        }
+
         val path = uri.encodedPath ?: ""
         val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
         val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
@@ -87,7 +125,7 @@ object DnsPortResolver {
     }
 
     /**
-     * 核心全动态解析：严格区分 HTTP 与 HTTPS
+     * 核心全动态解析入口：获取目标端口并将其登记为该域名的专属默认端口
      */
     suspend fun resolveTargetUrl(rawUrl: String): String = withContext(Dispatchers.IO) {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return@withContext rawUrl }
@@ -106,23 +144,19 @@ object DnsPortResolver {
         var targetPort: Int? = null
 
         if (scheme == "https") {
-            // HTTPS 仅查 Type 65
             targetPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
             if (targetPort != null && targetPort in 1..65535 && targetPort != 443) {
-                defaultPortMap["https:$host"] = targetPort
+                setDefaultPort("https", host, targetPort)
             } else {
-                defaultPortMap["https:$host"] = 443
+                setDefaultPort("https", host, 443)
                 return@withContext rawUrl
             }
         } else {
-            // HTTP 查询 Type 64
             targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
-
-            // 若 HTTP 无配置，检查是否仅配置了 HTTPS
             if (targetPort == null) {
                 val httpsPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
-                if (httpsPort != null && httpsPort in 1..65535 && httpsPort != 443) {
-                    defaultPortMap["https:$host"] = httpsPort
+                if (httpsPort != null && httpsPort in 1..65535 && httpsPort != 443 && httpsPort != 802) {
+                    setDefaultPort("https", host, httpsPort)
                     val path = uri.encodedPath ?: ""
                     val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
                     val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
@@ -131,9 +165,9 @@ object DnsPortResolver {
             }
 
             if (targetPort != null && targetPort in 1..65535 && targetPort != 80) {
-                defaultPortMap["http:$host"] = targetPort
+                setDefaultPort("http", host, targetPort)
             } else {
-                defaultPortMap["http:$host"] = 80
+                setDefaultPort("http", host, 80)
                 return@withContext rawUrl
             }
         }
@@ -141,7 +175,7 @@ object DnsPortResolver {
         val path = uri.encodedPath ?: ""
         val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
         val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
-        return@withContext "$scheme://$host:$targetPort$path$query$fragment"
+        return "$scheme://$host:$targetPort$path$query$fragment"
     }
 
     private fun queryUdpDnsPort(domain: String, qtype: Int): Int? {
@@ -234,8 +268,9 @@ object DnsPortResolver {
     }
 
     /**
-     * 地址栏净化：
-     * 只要端口是该域名下的“默认端口”（包括传统 80/443 以及解析出的专属端口），一律不在地址栏显示端口。
+     * 原生默认端口隐藏机制：
+     * 只要端口是该域名下的“默认端口”（无论传统 80/443 还是 DNS 专属默认端口），
+     * 像系统对待 80 和 443 一样，直接不在地址栏展示该端口！
      */
     fun cleanUrlForDisplay(url: String): String {
         if (url.isBlank()) return url
@@ -246,15 +281,16 @@ object DnsPortResolver {
         val host = uri.host?.lowercase() ?: return url
         val scheme = uri.scheme?.lowercase() ?: "http"
 
-        val defaultPort = defaultPortMap["$scheme:$host"] ?: if (scheme == "https") 443 else 80
-
-        if (port == defaultPort) {
+        // 如果是系统默认端口（原生 80/443 或解析出的专属默认端口），直接将其隐去
+        if (isDefaultPort(scheme, host, port)) {
             val portPart = ":$port"
             val index = url.indexOf(portPart)
             if (index != -1) {
                 return url.substring(0, index) + url.substring(index + portPart.length)
             }
         }
+
+        // 如果用户手动指定了非默认端口，则原样保留
         return url
     }
 }
