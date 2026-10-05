@@ -26,19 +26,20 @@ jobs:
       - name: 赋予 gradlew 执行权限
         run: chmod +x gradlew
 
-      - name: 配置 Release 签名并构建
-        # 仅针对目标变体构建，使用 debug 签名保证直接安装，并自动关闭 LeakCanary
+      - name: 生成签名密钥 (解决 validateSigning 校验失败)
         run: |
-          ./gradlew assembleSlionsFullDownloadRelease \
-            -Pandroid.injected.signing.store.file=$HOME/.android/debug.keystore \
-            -Pandroid.injected.signing.store.password=android \
-            -Pandroid.injected.signing.key.alias=androiddebugkey \
-            -Pandroid.injected.signing.key.password=android \
-            --stacktrace
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: 编译 Release 正式版 APK
+        run: ./gradlew assembleSlionsFullDownloadRelease --stacktrace
 
       - name: 提取并上传 Release APK
         uses: actions/upload-artifact@v4
         with:
           name: Fulguris-Release-APK
-          path: app/build/outputs/apk/slionsFullDownload/release/*.apk
+          path: app/build/outputs/apk/**/release/*.apk
           if-no-files-found: error
