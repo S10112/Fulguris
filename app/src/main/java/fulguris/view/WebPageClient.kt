@@ -149,9 +149,24 @@ class WebPageClient(
         val reqUri = request.url
         val scheme = reqUri.scheme?.lowercase() ?: ""
         val rawUrl = reqUri.toString()
+        val host = reqUri.host?.lowercase() ?: ""
 
         if (request.isForMainFrame) {
-            // 防火墙 1：未带端口的请求，查询并加载对应的非标目标端口
+            // 防火墙 1：检测 HTTPS 是否误挂了 HTTP 端口（服务端 301 错配重定向兜底纠偏）
+            if (scheme == "https" && reqUri.port != -1) {
+                val httpPort = DnsPortResolver.defaultPortMap["http:$host"]
+                val httpsPort = DnsPortResolver.defaultPortMap["https:$host"]
+                if (httpPort != null && reqUri.port == httpPort && httpsPort != null && httpsPort != httpPort) {
+                    val fixedUrl = rawUrl.replace(":$httpPort", ":$httpsPort")
+                    activity.runOnUiThread {
+                        view.stopLoading()
+                        view.loadUrl(fixedUrl)
+                    }
+                    return WebResourceResponse("text/html", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                }
+            }
+
+            // 防火墙 2：针对无端口请求，执行动态探测并定向直连
             if (reqUri.port == -1 && (scheme == "http" || scheme == "https")) {
                 val targetUrl = DnsPortResolver.getCachedUrl(rawUrl)
                 if (targetUrl != null && targetUrl != rawUrl) {
@@ -172,7 +187,7 @@ class WebPageClient(
                     }
                 }
             }
-            // 防火墙 2：针对带端口的会话恢复或跳转，验证并注册默认端口，使地址栏隐去端口
+            // 防火墙 3：针对带端口恢复的会话，核验默认端口并自动净化地址栏
             else if (reqUri.port != -1 && (scheme == "http" || scheme == "https")) {
                 if (!DnsPortResolver.isDefaultPort(rawUrl)) {
                     runBlocking {
@@ -532,9 +547,19 @@ class WebPageClient(
         val url = request.url.toString()
         val uri = request.url
         val scheme = uri.scheme?.lowercase() ?: ""
+        val host = uri.host?.lowercase() ?: ""
 
-        // 已经带有端口的请求，直接放行
+        // 纠偏：若 HTTPS 误挂了当前域名的 HTTP 明文端口，立即定向至该域名的默认 HTTPS 端口
         if (uri.port != -1) {
+            if (scheme == "https") {
+                val httpPort = DnsPortResolver.defaultPortMap["http:$host"]
+                val httpsPort = DnsPortResolver.defaultPortMap["https:$host"]
+                if (httpPort != null && uri.port == httpPort && httpsPort != null && httpsPort != httpPort) {
+                    val fixedUrl = url.replace(":$httpPort", ":$httpsPort")
+                    view.loadUrl(fixedUrl)
+                    return true
+                }
+            }
             return false
         }
 
