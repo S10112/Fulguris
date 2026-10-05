@@ -15,7 +15,7 @@ import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 
 object DnsPortResolver {
-    // 默认端口映射表：将 DNS 解析出的端口直接注册为该域名的“系统默认端口”
+    // 默认端口映射表：将 DNS 解析出的非标端口直接注册为该域名的“系统默认端口”
     // 格式: "scheme:host" -> 默认端口号 (例如 "https:j.6z.ee" -> 8641)
     private val defaultPortMap = ConcurrentHashMap<String, Int>()
 
@@ -37,6 +37,18 @@ object DnsPortResolver {
     }
 
     /**
+     * 检查当前 rawUrl 的端口是否为该域名的默认端口（提供给 WebPageClient 调用）
+     */
+    fun isCachedAsDefaultPort(rawUrl: String): Boolean {
+        val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return false }
+        val port = uri.port
+        if (port == -1) return true
+        val host = uri.host?.lowercase() ?: return false
+        val scheme = uri.scheme?.lowercase() ?: "http"
+        return isDefaultPort(scheme, host, port)
+    }
+
+    /**
      * 注册该域名的专属默认端口
      */
     fun setDefaultPort(scheme: String, host: String, port: Int) {
@@ -44,7 +56,7 @@ object DnsPortResolver {
     }
 
     /**
-     * 静默验证并写入缓存：针对历史记录或重启恢复的窗口，后台确认该端口是否为默认端口
+     * 静默验证并写入缓存：针对历史记录或重启恢复的窗口，后台确认该端口是否为专属默认端口
      */
     suspend fun verifyAndCachePort(rawUrl: String): Boolean = withContext(Dispatchers.IO) {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return@withContext false }
