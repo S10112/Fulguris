@@ -23,6 +23,10 @@ import fulguris.settings.preferences.userAgent
 import fulguris.settings.preferences.webViewEngineVersionDesktop
 import fulguris.settings.preferences.setReducedClientHints
 import fulguris.ssl.SslState
+import fulguris.utils.DnsPortResolver
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.DownloadManager
@@ -211,22 +215,37 @@ class WebPageTab(
             if (isForeground) {
                 // When frozen tab goes foreground we need to load its bundle in webView
                 latentTabInitializer?.apply {
+                    // Lazy creation of our WebView
                     createWebView()
+                    // Load bundle in WebView
                     initializeContent(this)
+                    // Discard tab initializer since we just consumed it
                     latentTabInitializer = null
                 }
             } else {
+                // A tab sent to the background is not so new anymore
                 iIntent = null
             }
             webBrowser.onTabChanged(this)
         }
 
+    /**
+     * Gets whether or not the page rendering is inverted or not. The main purpose of this is to
+     * indicate that JavaScript should be run at the end of a page load to invert only the images
+     * back to their non-inverted states.
+     *
+     * @return true if the page is in inverted mode, false otherwise.
+     */
     var invertPage = false
         private set
 
+    /**
+     * True if desktop mode is enabled for this tab.
+     */
     var desktopMode = false
         set(aDesktopMode) {
             field = aDesktopMode
+            // Set our user agent accordingly
             if (aDesktopMode) {
                 webView?.settings?.userAgentString = WINDOWS_DESKTOP_USER_AGENT_PREFIX + webViewEngineVersionDesktop(activity.application)
             } else {
@@ -234,24 +253,51 @@ class WebPageTab(
             }
         }
 
+    /**
+     *
+     */
     var darkMode = false
         set(aDarkMode) {
             field = aDarkMode
             applyDarkMode()
         }
 
+    /**
+     * Enable user to override domain settings dark mode preference at the tab level.
+     */
     var darkModeBypassDomainSettings = false
+
+    /**
+     *
+     */
     var desktopModeBypassDomainSettings = false
 
+    /**
+     * Get our find in page search query.
+     *
+     * @return The find in page search query or an empty string.
+     */
     var searchQuery: String = ""
         set(aSearchQuery) {
             field = aSearchQuery
         }
 
+    /**
+     * Define if this tab has an active find in page search.
+     */
     var searchActive = false
 
+    /**
+     *
+     */
     private val webViewHandler = WebViewHandler(this)
 
+    /**
+     * This method gets the additional headers that should be added with each request the browser
+     * makes.
+     *
+     * @return a non null Map of Strings with the additional request headers.
+     */
     internal val requestHeaders = ArrayMap<String, String>()
 
     private val maxFling: Float
@@ -267,48 +313,87 @@ class WebPageTab(
 
     private val networkDisposable: Disposable
 
+    /**
+     * Will decide to enable hardware acceleration and WebGL or not
+     */
     private var layerType = LayerType.Hardware
 
+    /**
+     * This method determines whether the current tab is visible or not.
+     *
+     * @return true if the WebView is non-null and visible, false otherwise.
+     */
     val isShown: Boolean
         get() = webView?.isShown == true
 
+    /**
+     * Gets the current progress of the WebView.
+     *
+     * @return returns a number between 0 and 100 with the current progress of the WebView. If the
+     * WebView is null, then the progress returned will be 100.
+     */
     val progress: Int
         get() = webView?.progress ?: 100
 
+    /**
+     * Whether the page is currently loading.
+     */
     var isLoading = false
         internal set
 
+    /**
+     * Get the current user agent used by the WebView.
+     */
     private val userAgent: String
         get() = webView?.settings?.userAgentString ?: ""
 
+    /**
+     * Gets the favicon currently in use by the page.
+     */
     val favicon: Bitmap
         get() = titleInfo.getFavicon()
 
+    /**
+     * Get the current title of the page, retrieved from the title object.
+     */
     val title: String
         get() = titleInfo.getTitle()
 
+    /**
+     * Get the current [SslCertificate] if there is any associated with the current page.
+     */
     val sslCertificate: SslCertificate?
         get() = webView?.certificate
 
     /**
-     * 保持系统原生的真实 URL 读取，完全不破坏底层状态与会话管理
+     * 地址栏读取的数据源：通过 cleanUrlForDisplay 彻底剥离非标端口，像 80/443 一样只显示干净域名与路径
      */
     val url: String
         get() {
-            return if (webView == null || webView!!.url.isNullOrBlank() || webView!!.url.isSpecialUrl()) {
+            val raw = if (webView == null || webView!!.url.isNullOrBlank() || webView!!.url.isSpecialUrl()) {
                 iTargetUrl.toString()
             } else {
                 webView!!.url as String
             }
+            return DnsPortResolver.cleanUrlForDisplay(raw)
         }
 
+    /**
+     * Used to check if our URL really changed
+     */
     var lastUrl: String = ""
 
+    /**
+     * Return true if this tab is frozen, meaning it was not yet loaded from its bundle
+     */
     val isFrozen : Boolean
         get() = latentTabInitializer?.tabModel?.webView != null
 
     private var iDownloadListener: LightningDownloadListener? = null
 
+    /**
+     * Constructor
+     */
     init {
         webBrowser = activity as WebBrowser
         titleInfo = WebPageHeader(activity)
@@ -362,6 +447,9 @@ class WebPageTab(
         }
     }
 
+    /**
+     * Create our WebView.
+     */
     private fun createWebView() {
         userPreferences.preferences.registerOnSharedPreferenceChangeListener(this)
         defaultDomainSettings.preferences.registerOnSharedPreferenceChangeListener(this)
@@ -734,14 +822,18 @@ class WebPageTab(
         webView?.visibility = visible
     }
 
+    /**
+     * 刷新时优先以 webView 当前底层真实连接地址（包含非标端口）进行重载
+     */
     fun reload(aForce: Boolean = false) {
         webView?.let { wv ->
+            val reloadTarget = wv.url ?: iTargetUrl.toString()
             if (!aForce) {
-                loadUrl(url)
+                loadUrl(reloadTarget)
             } else {
                 val originalCacheMode = wv.settings.cacheMode
                 wv.settings.cacheMode = WebSettings.LOAD_NO_CACHE
-                loadUrl(url) {
+                loadUrl(reloadTarget) {
                     wv.settings.cacheMode = originalCacheMode
                 }
             }
@@ -897,38 +989,42 @@ class WebPageTab(
     fun canGoForward(): Boolean = webView?.canGoForward() == true
 
     /**
-     * 核心接管加载方法：
-     * 1. 遇到 g.6z.ee 时，直接将原本默认的 80/443 接管为 802/803 端口直连；
-     * 2. 其他任何正常域名原封不动放行，绝不受任何干扰；
-     * 3. 0ms 瞬间直达，无需外建任何工具类。
+     * 核心加载逻辑：
+     * 针对未带端口的请求先进行极速同步/异步端口预换算，
+     * 杜绝 WebView 盲目跑去连 443 或 80 导致超时！
      */
     fun loadUrl(aUrl: String, onLoadComplete: (() -> Unit)? = null) {
         isLoading = true
 
-        val uri = try { Uri.parse(aUrl) } catch (e: Exception) { Uri.parse("") }
-        val scheme = uri.scheme?.lowercase() ?: "http"
-        val host = uri.host?.lowercase() ?: ""
+        val uri = Uri.parse(aUrl)
+        val scheme = uri.scheme?.lowercase()
 
-        val finalUrl = if (uri.port == -1 && (scheme == "http" || scheme == "https")) {
-            val targetPort = when {
-                host == "g.6z.ee" && scheme == "http" -> 802
-                host == "g.6z.ee" && scheme == "https" -> 803
-                // 未来如有其他解析了非标端口的域名，直接在此追加一行即可
-                else -> null
-            }
-
-            if (targetPort != null) {
-                val path = uri.encodedPath ?: ""
-                val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
-                val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
-                "$scheme://$host:$targetPort$path$query$fragment"
-            } else {
-                aUrl
-            }
-        } else {
-            aUrl
+        if (uri.scheme == Schemes.Fulguris || uri.scheme == Schemes.About) {
+            executeInternalLoad(aUrl, onLoadComplete)
+            return
         }
 
+        // 针对没有显式端口的普通网页请求
+        if (uri.port == -1 && (scheme == "http" || scheme == "https")) {
+            // 1. 同步预判：有缓存时直接 0ms 单次直达
+            val cachedUrl: String? = DnsPortResolver.getCachedUrl(aUrl)
+            if (cachedUrl != null) {
+                executeInternalLoad(cachedUrl, onLoadComplete)
+                return
+            }
+
+            // 2. 首次回车无缓存时：后台极速探测，拿到目标端口后立即进行单次加载并同步界面状态
+            CoroutineScope(Dispatchers.Main).launch {
+                val resolvedUrl: String = DnsPortResolver.resolveTargetUrl(aUrl)
+                executeInternalLoad(resolvedUrl, onLoadComplete)
+                webBrowser.onTabChangedUrl(this@WebPageTab)
+            }
+        } else {
+            executeInternalLoad(aUrl, onLoadComplete)
+        }
+    }
+
+    private fun executeInternalLoad(finalUrl: String, onLoadComplete: (() -> Unit)?) {
         iTargetUrl = Uri.parse(finalUrl)
         onLoadCompleteCallback = onLoadComplete
 
@@ -1101,16 +1197,16 @@ class WebPageTab(
         private val SCROLL_DOWN_THRESHOLD = fulguris.utils.Utils.dpToPx(30f)
 
         private val negativeColorArray = floatArrayOf(
-            -1.0f, 0f, 0f, 0f, 255f, // red
-            0f, -1.0f, 0f, 0f, 255f, // green
-            0f, 0f, -1.0f, 0f, 255f, // blue
-            0f, 0f, 0f, 1.0f, 0f // alpha
+            -1.0f, 0f, 0f, 0f, 255f,
+            0f, -1.0f, 0f, 0f, 255f,
+            0f, 0f, -1.0f, 0f, 255f,
+            0f, 0f, 0f, 1.0f, 0f
         )
         private val increaseContrastColorArray = floatArrayOf(
-            2.0f, 0f, 0f, 0f, -160f, // red
-            0f, 2.0f, 0f, 0f, -160f, // green
-            0f, 0f, 2.0f, 0f, -160f, // blue
-            0f, 0f, 0f, 1.0f, 0f // alpha
+            2.0f, 0f, 0f, 0f, -160f,
+            0f, 2.0f, 0f, 0f, -160f,
+            0f, 0f, 2.0f, 0f, -160f,
+            0f, 0f, 0f, 1.0f, 0f
         )
     }
 }
