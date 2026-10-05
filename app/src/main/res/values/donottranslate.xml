@@ -1,28 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
- The contents of this file are subject to the Common Public Attribution License Version 1.0.
- (the "License"); you may not use this file except in compliance with the License.
- You may obtain a copy of the License at:
- https://github.com/Slion/Fulguris/blob/main/LICENSE.CPAL-1.0.
- The License is based on the Mozilla Public License Version 1.1, but Sections 14 and 15 have been
- added to cover use of software over a computer network and provide for limited attribution for
- the Original Developer. In addition, Exhibit A has been modified to be consistent with Exhibit B.
-
- Software distributed under the License is distributed on an "AS IS" basis, WITHOUT WARRANTY OF
- ANY KIND, either express or implied. See the License for the specific language governing rights
- and limitations under the License.
-
- The Original Code is Fulguris.
-
- The Original Developer is the Initial Developer.
- The Initial Developer of the Original Code is Stéphane Lenclud.
-
- All portions of the code written by Stéphane Lenclud are Copyright © 2020 Stéphane Lenclud.
- All Rights Reserved.
--->
 <resources xmlns:tools="http://schemas.android.com/tools">
 
-    <string name="app_name">Fulguris</string>
+    <string name="app_name">金成浏览器</string>
     <string name="url_app_home_page">http://fulguris.slions.net</string>
     <string name="url_privacy_policy">https://slions.net/threads/fulguris-privacy-policy.99/</string>
     <string name="url_terms_and_conditions">https://slions.net/threads/fulguris-terms-conditions.100/</string>
@@ -34,7 +13,6 @@
     <string name="url_greasy_fork">https://greasyfork.org</string>
     <string name="name_greasy_fork">Greasy Fork</string>
 
-    <!-- Settings keys -->
     <string name="pref_key_hide_status_bar">pref_key_hide_status_bar</string>
     <string name="pref_key_hide_tool_bar">pref_key_hide_tool_bar</string>
     <string name="pref_key_show_tool_bar_on_scroll_up">pref_key_show_tool_bar_when_scroll_up</string>
@@ -53,16 +31,10 @@
     <string name="pref_key_network_cache_size">pref_key_network_cache_size</string>
     <string name="pref_key_clear_network_cache">pref_key_clear_network_cache</string>
 
-
-    <!-- On tab close -->
     <string name="pref_key_on_tab_close_show_snackbar">pref_key_on_tab_close_show_snackbar</string>
     <string name="pref_key_on_tab_close_vibrate">pref_key_on_tab_close_vibrate</string>
-
-    <!-- On tab change -->
     <string name="pref_key_on_tab_change_show_animation">pref_key_on_tab_change_show_animation</string>
     <string name="pref_key_on_tab_change_animation_duration">pref_key_on_tab_change_animation_duration</string>
-
-    <!-- On tab back -->
     <string name="pref_key_on_tab_back_show_animation">pref_key_on_tab_back_show_animation</string>
     <string name="pref_key_on_tab_flip_animation_duration">pref_key_on_tab_flip_animation_duration</string>
     <string name="pref_key_on_page_started_show_animation">pref_key_on_page_started_show_animation</string>
@@ -78,7 +50,7 @@
     <string name="pref_key_tab_list_item_show_close_button">pref_key_tab_list_item_show_close_button</string>
     <string name="pref_key_menu_show_exit">pref_key_menu_show_exit</string>
     <string name="pref_key_menu_show_new_tab">pref_key_menu_show_new_tab</string>
-    <!-- Privacy -->
+
     <string name="pref_key_accept_terms">pref_key_accept_terms</string>
     <string name="pref_key_crash_report">pref_key_crash_report</string>
     <string name="pref_key_analytics">pref_key_analytics</string>
@@ -123,7 +95,6 @@
     <string name="pref_key_extension_exclude_urls">pref_key_extension_exclude_urls</string>
     <string name="pref_key_extension_view_source">pref_key_extension_view_source</string>
     <string name="pref_key_extension_delete">pref_key_extension_delete</string>
-
     <string name="pref_key_search_in_new_tab">pref_key_search_in_new_tab</string>
     <string name="pref_key_url_in_new_tab">pref_key_url_in_new_tab</string>
     <string name="pref_key_homepage_in_new_tab">pref_key_homepage_in_new_tab</string>
@@ -137,22 +108,14 @@
     <string name="pref_key_reset_settings">pref_key_reset_settings</string>
     <string name="pref_key_reset_default_domain">pref_key_reset_default_domain</string>
 
-
     <string name="pref_key_locale">pref_key_locale</string>
     <string name="pref_key_default_browser">pref_key_default_browser</string>
-
     <string name="pref_key_blocklist_auto_update">pref_key_blocklist_auto_update</string>
     <string name="pref_key_blocklist_auto_update_frequency">pref_key_blocklist_auto_update_frequency</string>
     <string name="pref_key_modify_filters">pref_key_modify_filters</string>
 
-
     <string name="pref_key_session_export_category">pref_key_session_export_category</string>
     <string name="pref_key_sessions_import">pref_key_sessions_import</string>
-<!--    <string name="pref_key_sessions_export">pref_key_sessions_export</string>
-    <string name="pref_key_sessions_reset">pref_key_sessions_reset</string>
--->
-
-    <!-- Settings keys -->
     <string name="pref_key_visit_domain">pref_key_visit_domain</string>
     <string name="pref_key_contact_us">pref_key_contact_us</string>
     <string name="pref_key_accent">pref_key_accent</string>
@@ -169,17 +132,13 @@
     <string name="pref_key_scrollbar_size">pref_key_scrollbar_size</string>
     <string name="pref_key_back">pref_key_back</string>
     <string name="pref_key_delete">pref_key_delete</string>
-
     <string name="pref_key_debug">pref_key_debug</string>
     <string name="pref_key_webview">pref_key_webview</string>
     <string name="pref_key_android">pref_key_android</string>
-    <!-- Brand name, shown as fallback title for the Android version entry (overridden at runtime). -->
-    <string name="android">Android</string>
 
+    <string name="android">Android</string>
     <string name="pref_key_subscriptions_category">pref_key_subscriptions_category</string>
     <string name="pref_key_contribute_category">pref_key_contribute_category</string>
-
-    <!-- Domain settings -->
     <string name="pref_key_launch_app">pref_key_launch_app</string>
     <string name="pref_key_launch_app_override">pref_key_launch_app_override</string>
     <string name="pref_key_domains">pref_key_domains</string>
@@ -193,33 +152,25 @@
     <string name="pref_key_delete_page_cookies">pref_key_delete_page_cookies</string>
     <string name="pref_key_clear_location_permissions">pref_key_clear_location_permissions</string>
     <string name="pref_key_delete_all_domains_settings">pref_key_delete_all_domains_settings</string>
-
     <string name="pref_key_page_history">pref_key_page_history</string>
-
-    <!-- Display settings -->
     <string name="pref_key_task_label">pref_key_task_label</string>
     <string name="pref_key_task_icon">pref_key_task_icon</string>
     <string name="pref_key_toolbar_label">pref_key_toolbar_label</string>
     <string name="pref_key_add_configuration">pref_key_add_configuration</string>
     <string name="pref_key_configurations">pref_key_configurations</string>
     <string name="pref_key_layer_type">pref_key_layer_type</string>
-
-
     <string name="pref_key_portrait">pref_key_portrait</string>
     <string name="pref_key_landscape">pref_key_landscape</string>
     <string name="pref_key_configuration_custom">pref_key_configuration_custom</string>
     <string name="pref_key_full_menu">pref_key_full_menu</string>
 
-    <!-- See: NewTabPosition -->
     <string name="new_tab_position_before_value">BEFORE_CURRENT_TAB</string>
     <string name="new_tab_position_after_value">AFTER_CURRENT_TAB</string>
     <string name="new_tab_position_start_value">START_OF_TAB_LIST</string>
     <string name="new_tab_position_end_value">END_OF_TAB_LIST</string>
 
-
     <string name="slions_update_check_url">https://slions.net/api/resources/10/versions</string>
     <string name="slions_api_key">eQxvqk5DGEXUBqdt5Y_7rGRxF2m0REdb</string>
-
 
     <string name="two">2</string>
     <string name="three">3</string>
@@ -233,12 +184,10 @@
 
     <string name="app_name_yuzu_browser">Yuzu Browser</string>
     <string name="app_name_lightning_browser">Lightning Browser</string>
-
     <string name="license_mpl">Mozilla Public License 2.0</string>
     <string name="license_cpal">Common Public Attribution License 1.0</string>
     <string name="license_apache">Apache License 2.0</string>
 
-    <!-- Search Engines -->
     <string name="search_engine_ask">Ask</string>
     <string name="search_engine_baidu">Baidu</string>
     <string name="search_engine_bing">Bing</string>
@@ -261,7 +210,6 @@
     <string name="search_engine_yahoo">Yahoo</string>
     <string name="search_engine_yandex">Yandex</string>
 
-    <!-- Universal technical terms -->
     <string name="request_url">URL</string>
 
 </resources>
