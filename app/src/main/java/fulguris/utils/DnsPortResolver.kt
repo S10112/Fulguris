@@ -19,7 +19,7 @@ object DnsPortResolver {
     private val portCache = ConcurrentHashMap<String, Int>()
 
     /**
-     * 极速同步获取缓存中已重写的 URL（已缓存则 0ms 返回，未缓存返回 null）
+     * 极速同步获取缓存中已重写的 URL（已缓存非标端口则 0ms 返回，标准端口或未缓存返回 null）
      */
     fun getCachedUrl(rawUrl: String): String? {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return null }
@@ -31,18 +31,14 @@ object DnsPortResolver {
 
         val targetPort = portCache["$scheme:$host"] ?: return null
 
-        // 标准 80 / 443 原样放行
+        // 标准 80 / 443 放行原生请求
         if ((scheme == "http" && targetPort == 80) || (scheme == "https" && targetPort == 443)) {
-            return rawUrl
+            return null
         }
 
-        // 绝对防火墙：严禁 https 挂 802
+        // 防火墙：严禁 https 挂 802 明文端口
         if (scheme == "https" && targetPort == 802) {
-            val safePort = portCache["https:$host"]?.takeIf { it != 802 } ?: 803
-            val path = uri.encodedPath ?: ""
-            val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
-            val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
-            return "https://$host:$safePort$path$query$fragment"
+            return null
         }
 
         val path = uri.encodedPath ?: ""
@@ -52,7 +48,7 @@ object DnsPortResolver {
     }
 
     /**
-     * 核心全动态解析入口：零硬编码，适用于任意配置了 RFC 9460 记录的域名
+     * 核心全动态解析入口：区分普通网站（80/443）与非标端口网站
      */
     suspend fun resolveTargetUrl(rawUrl: String): String = withContext(Dispatchers.IO) {
         val uri = try { Uri.parse(rawUrl) } catch (e: Exception) { return@withContext rawUrl }
@@ -71,36 +67,40 @@ object DnsPortResolver {
         var targetPort: Int? = null
 
         if (scheme == "https") {
-            // HTTPS 只允许查 Type 65 (RFC 9460 HTTPS 记录)
+            // HTTPS 查询 Type 65 (RFC 9460 HTTPS 记录)
             targetPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
-            
-            // 兜底安全校验：HTTPS 绝不允许被赋予 802
-            if (targetPort == null || targetPort == 802) {
-                targetPort = 803
+
+            if (targetPort != null && targetPort in 1..65535 && targetPort != 443) {
+                // 仅当明确解析到有效的非标 HTTPS 端口时记录
+                portCache["https:$host"] = targetPort
+            } else {
+                // 未配置非标端口：标准 HTTPS 网站，记录 443 并放行
+                portCache["https:$host"] = 443
+                return@withContext rawUrl
             }
-            portCache["https:$host"] = targetPort
         } else {
             // HTTP 查询 Type 64 (RFC 9460 SVCB 记录)
             targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
 
-            // 如果 HTTP 探测未配，检查该域名是否仅配置了 HTTPS 端口记录
+            // 若 HTTP 未配置，探测是否配置了 HTTPS 非标端口记录
             if (targetPort == null) {
                 val httpsPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
-                if (httpsPort != null && httpsPort > 0 && httpsPort != 443 && httpsPort != 802) {
+                if (httpsPort != null && httpsPort in 1..65535 && httpsPort != 443 && httpsPort != 802) {
                     portCache["https:$host"] = httpsPort
                     val path = uri.encodedPath ?: ""
                     val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
                     val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
                     return@withContext "https://$host:$httpsPort$path$query$fragment"
                 }
-                targetPort = 802 // 默认非标 HTTP 端口
             }
-            portCache["http:$host"] = targetPort
-        }
 
-        // 普通网站默认 80/443 直接原样放行
-        if ((scheme == "http" && targetPort == 80) || (scheme == "https" && targetPort == 443)) {
-            return@withContext rawUrl
+            if (targetPort != null && targetPort in 1..65535 && targetPort != 80) {
+                portCache["http:$host"] = targetPort
+            } else {
+                // 未配置非标端口：标准 HTTP 网站，记录 80 并放行
+                portCache["http:$host"] = 80
+                return@withContext rawUrl
+            }
         }
 
         val path = uri.encodedPath ?: ""
@@ -192,7 +192,8 @@ object DnsPortResolver {
                         val data = answers.getJSONObject(i).optString("data")
                         val match = Regex("""port=(\d+)""").find(data)
                         if (match != null) {
-                            return match.groupValues[1].toInt()
+                            val port = match.groupValues[1].toInt()
+                            if (port in 1..65535) return port
                         }
                     }
                 }
