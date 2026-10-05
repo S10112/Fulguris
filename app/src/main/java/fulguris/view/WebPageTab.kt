@@ -199,7 +199,6 @@ class WebPageTab(
      * That's notably used to decide if we close our activity when closing this tab thus going back to the app which opened it.
      */
     val isNewTab: Boolean get() = iIntent!=null
-    //val fromSelf: Boolean get() = iIntent?.getStringExtra("PACKAGE") == activity.packageName;
 
     var iIntent: Intent? = null
 
@@ -212,36 +211,22 @@ class WebPageTab(
             if (isForeground) {
                 // When frozen tab goes foreground we need to load its bundle in webView
                 latentTabInitializer?.apply {
-		            // Lazy creation of our WebView
                     createWebView()
-                    // Load bundle in WebView
                     initializeContent(this)
-                    // Discard tab initializer since we just consumed it
                     latentTabInitializer = null
                 }
             } else {
-                // A tab sent to the background is not so new anymore
                 iIntent = null
             }
             webBrowser.onTabChanged(this)
         }
-    /**
-     * Gets whether or not the page rendering is inverted or not. The main purpose of this is to
-     * indicate that JavaScript should be run at the end of a page load to invert only the images
-     * back to their non-inverted states.
-     *
-     * @return true if the page is in inverted mode, false otherwise.
-     */
+
     var invertPage = false
         private set
 
-    /**
-     * True if desktop mode is enabled for this tab.
-     */
     var desktopMode = false
         set(aDesktopMode) {
             field = aDesktopMode
-            // Set our user agent accordingly
             if (aDesktopMode) {
                 webView?.settings?.userAgentString = WINDOWS_DESKTOP_USER_AGENT_PREFIX + webViewEngineVersionDesktop(activity.application)
             } else {
@@ -249,54 +234,24 @@ class WebPageTab(
             }
         }
 
-    /**
-     *
-     */
     var darkMode = false
         set(aDarkMode) {
             field = aDarkMode
-            applyDarkMode();
+            applyDarkMode()
         }
 
-    /**
-     * Enable user to override domain settings dark mode preference at the tab level.
-     * TODO: should we persist that guy?
-     * Maybe not as we could see this as a temporary option
-     */
     var darkModeBypassDomainSettings = false
-
-    /**
-     *
-     */
     var desktopModeBypassDomainSettings = false
 
-    /**
-     * Get our find in page search query.
-     *
-     * @return The find in page search query or an empty string.
-     */
     var searchQuery: String = ""
         set(aSearchQuery) {
             field = aSearchQuery
-            //find(searchQuery)
         }
 
-    /**
-     * Define if this tab has an active find in page search.
-     */
     var searchActive = false
 
-    /**
-     *
-     */
     private val webViewHandler = WebViewHandler(this)
 
-    /**
-     * This method gets the additional headers that should be added with each request the browser
-     * makes.
-     *
-     * @return a non null Map of Strings with the additional request headers.
-     */
     internal val requestHeaders = ArrayMap<String, String>()
 
     private val maxFling: Float
@@ -312,132 +267,61 @@ class WebPageTab(
 
     private val networkDisposable: Disposable
 
-    /**
-     * Will decide to enable hardware acceleration and WebGL or not
-     */
     private var layerType = LayerType.Hardware
 
-    /**
-     * This method determines whether the current tab is visible or not.
-     *
-     * @return true if the WebView is non-null and visible, false otherwise.
-     */
     val isShown: Boolean
         get() = webView?.isShown == true
 
-    /**
-     * Gets the current progress of the WebView.
-     *
-     * @return returns a number between 0 and 100 with the current progress of the WebView. If the
-     * WebView is null, then the progress returned will be 100.
-     */
     val progress: Int
         get() = webView?.progress ?: 100
 
-    /**
-     * Whether the page is currently loading.
-     *
-     * Driven by the page lifecycle rather than derived on the fly from [progress]: a fresh
-     * navigation (loadUrl/reload/history) and onPageStarted set it, while onPageFinished,
-     * stopLoading and the first 100% progress report clear it. A progress event never sets it
-     * back to true, so stale or out-of-order WebView progress reports — after restoreState the
-     * WebView never reports 100, and late subframe events dip back below 100 after completion —
-     * cannot leave the stop button stuck on or make it flicker.
-     */
     var isLoading = false
         internal set
 
-    /**
-     * Get the current user agent used by the WebView.
-     *
-     * @return retuns the current user agent of the WebView instance, or an empty string if the
-     * WebView is null.
-     */
     private val userAgent: String
         get() = webView?.settings?.userAgentString ?: ""
 
-    /**
-     * Gets the favicon currently in use by the page. If the current page does not have a favicon,
-     * it returns a default icon.
-     *
-     * @return a non-null Bitmap with the current favicon.
-     */
     val favicon: Bitmap
         get() = titleInfo.getFavicon()
 
-    /**
-     * Get the current title of the page, retrieved from the title object.
-     *
-     * @return the title of the page, or an empty string if there is no title.
-     */
     val title: String
         get() = titleInfo.getTitle()
 
-    /**
-     * Get the current [SslCertificate] if there is any associated with the current page.
-     */
     val sslCertificate: SslCertificate?
         get() = webView?.certificate
 
     /**
-     * Get the current URL of the WebView, or an empty string if the WebView is null or the URL is
-     * null.
-     *
-     * @return the current URL or an empty string.
+     * 保持系统原生的真实 URL 读取，完全不破坏底层状态与会话管理
      */
     val url: String
         get() {
-            //TODO: One day find a way to write this expression without !! and without duplicating iTargetUrl.toString(), Kotlin is so weird
             return if (webView == null || webView!!.url.isNullOrBlank() || webView!!.url.isSpecialUrl()) {
                 iTargetUrl.toString()
-            } else  {
+            } else {
                 webView!!.url as String
             }
         }
 
-    /**
-     * Used to check if our URL really changed
-     */
     var lastUrl: String = ""
 
-    /**
-     * Return true if this tab is frozen, meaning it was not yet loaded from its bundle
-     */
     val isFrozen : Boolean
         get() = latentTabInitializer?.tabModel?.webView != null
 
-
-    /**
-     * We had forgotten to unregisterReceiver our download listener thus leaking them all whenever we switched between sessions.
-     * It turns out android as a hardcoded limit of 1000 [BroadcastReceiver] per application.
-     * So after a while switching between sessions with many tabs we would get an exception saying:
-     * "Too many receivers, total of 1000, registered for pid"
-     * See: https://stackoverflow.com/q/58179733/3969362
-     * TODO: Do we really need one of those per tab/WebView?
-     */
     private var iDownloadListener: LightningDownloadListener? = null
 
-    /**
-     * Constructor
-     */
     init {
-        //activity.injector.inject(this)
         webBrowser = activity as WebBrowser
         titleInfo = WebPageHeader(activity)
         maxFling = ViewConfiguration.get(activity).scaledMaximumFlingVelocity.toFloat()
 
-        // Mark our URL
         iTargetUrl = Uri.parse(tabInitializer.url())
 
         if (tabInitializer !is FreezableBundleInitializer) {
-            // Create our WebView now
-            //TODO: it looks like our special URLs don't get frozen for some reason
             createWebView()
             initializeContent(tabInitializer)
             desktopMode = defaultDomainSettings.desktopMode
             darkMode = defaultDomainSettings.darkMode
         } else {
-            // Our WebView will only be created whenever our tab goes to the foreground
             latentTabInitializer = tabInitializer
             titleInfo.setTitle(tabInitializer.tabModel.title)
             tabInitializer.tabModel.favicon.let {titleInfo.setFavicon(it)}
@@ -452,9 +336,6 @@ class WebPageTab(
             .subscribe(::setNetworkAvailable)
     }
 
-    /**
-     *
-     */
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
         when (key) {
             activity.getString(R.string.pref_key_scrollbar_size) -> {
@@ -474,26 +355,18 @@ class WebPageTab(
                 webView?.scrollBarFadeDuration = userPreferences.scrollbarFadeDuration.toInt()
 
             activity.getString(R.string.pref_key_location) -> {
-                // Handle location permission changes from default domain settings
                 if (!isIncognito) {
                     webView?.settings?.setGeolocationEnabled(defaultDomainSettings.locationEnabled)
                 }
             }
-
-            // TODO: Handle other settings, or we could just call initializePreferences()
         }
     }
 
-    /**
-     * Create our WebView.
-     */
     private fun createWebView() {
-
         userPreferences.preferences.registerOnSharedPreferenceChangeListener(this)
         defaultDomainSettings.preferences.registerOnSharedPreferenceChangeListener(this)
 
         webPageClient = WebPageClient(activity, this)
-        // Inflate our WebView as loading it from XML layout is needed to be able to set scrollbars color
         webView = activity.layoutInflater.inflate(R.layout.webview, null) as WebViewEx
         webView?.apply {
             proxy = this@WebPageTab
@@ -504,7 +377,6 @@ class WebPageTab(
             scrollBarFadeDuration = userPreferences.scrollbarFadeDuration.toInt()
 
             setFindListener(this@WebPageTab)
-            //id = this@[WebPageTab].id
             gestureDetector = GestureDetector(activity, CustomGestureListener(this))
 
             isFocusableInTouchMode = true
@@ -525,8 +397,6 @@ class WebPageTab(
 
             createDownloadListener()
 
-            // For older devices show Tool Bar On Page Top won't work after fling to top.
-            // Who cares? I mean those devices are probably from 2014 or older.
             val tl = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) TouchListener().also { setOnScrollChangeListener(it) } else TouchListenerLollipop()
             setOnTouchListener(tl)
 
@@ -535,21 +405,15 @@ class WebPageTab(
 
         initializePreferences()
 
-        // If search was active enable it again
         if (searchActive) {
             find(searchQuery)
         }
     }
 
-    /**
-     *
-     */
     private fun createDownloadListener() {
-        // We want to receive download complete notifications
         iDownloadListener = LightningDownloadListener(activity) { webView }
         webView?.setDownloadListener(iDownloadListener.also {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // We need to export it otherwise we don't get download ready notifications
                 activity.registerReceiver(it, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_EXPORTED)
             } else {
                 activity.registerReceiver(it, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
@@ -557,11 +421,7 @@ class WebPageTab(
         })
     }
 
-    /**
-     *
-     */
     private fun destroyDownloadListener() {
-        //See: https://console.firebase.google.com/project/fulguris-b1f69/crashlytics/app/android:net.slions.fulguris.full.playstore/issues/ea99c7ea0c57f66eae6e95532a16859d
         if (iDownloadListener!=null) {
             webView?.setDownloadListener(null)
             activity.unregisterReceiver(iDownloadListener)
@@ -569,13 +429,8 @@ class WebPageTab(
         }
     }
 
-
     fun currentSslState(): SslState = webPageClient.sslState
 
-    /**
-     * This method loads the homepage for the browser. Either it loads the URL stored as the
-     * homepage, or loads the startpage or bookmark page if either of those are set as the homepage.
-     */
     fun loadHomePage() {
         if (isIncognito) {
             iTargetUrl = Uri.parse(Uris.FulgurisIncognito)
@@ -586,51 +441,30 @@ class WebPageTab(
         }
     }
 
-    /**
-     * This function loads the bookmark page via the [BookmarkPageInitializer].
-     */
     fun loadBookmarkPage() {
         iTargetUrl = Uri.parse(Uris.FulgurisBookmarks)
         initializeContent(bookmarkPageInitializer)
     }
 
-    /**
-     * This function loads the download page via the [DownloadPageInitializer].
-     */
     fun loadDownloadsPage() {
         iTargetUrl = Uri.parse(Uris.FulgurisDownloads)
         initializeContent(downloadPageInitializer)
     }
 
-    /**
-     *
-     */
     fun loadHistoryPage() {
         iTargetUrl = Uri.parse(Uris.FulgurisHistory)
         initializeContent(historyPageInitializer)
     }
 
-
-    /**
-     * Basically activate our tab initializer which typically loads something in our WebView.
-     * [ResultMessageInitializer] being a notable exception as it will only send a message to something to load target URL at a later stage.
-     */
     private fun initializeContent(tabInitializer: TabInitializer) {
         webView?.let { tabInitializer.initialize(it, requestHeaders) }
     }
 
-
-    /**
-     * Initialize the preference driven settings of the WebView. This method must be called whenever
-     * the preferences are changed within SharedPreferences.
-     * Apparently called whenever the app is sent to the foreground.
-     */
     @SuppressLint("NewApi", "SetJavaScriptEnabled")
     fun initializePreferences() {
         val settings = webView?.settings ?: return
 
         webPageClient.updatePreferences()
-
 
         val modifiesHeaders = userPreferences.doNotTrackEnabled
             || userPreferences.saveDataEnabled
@@ -666,12 +500,7 @@ class WebPageTab(
             settings.setGeolocationEnabled(false)
         }
 
-        // Since this runs when the activity resumes we need to also take desktop mode into account
-        // Set the user agent properly taking desktop mode into account
         desktopMode = desktopMode
-        // Don't just do the following as that's not taking desktop mode into account
-        //setUserAgentForPreference(userPreferences)
-
         settings.saveFormData = userPreferences.savePasswordsEnabled && !isIncognito
 
         if (defaultDomainSettings.javaScriptEnabled) {
@@ -687,8 +516,6 @@ class WebPageTab(
             try {
                 settings.layoutAlgorithm = LayoutAlgorithm.TEXT_AUTOSIZING
             } catch (e: Exception) {
-                // This shouldn't be necessary, but there are a number
-                // of KitKat devices that crash trying to set this
                 Timber.e(e,"Problem setting LayoutAlgorithm to TEXT_AUTOSIZING")
             }
         } else {
@@ -696,78 +523,42 @@ class WebPageTab(
         }
 
         settings.blockNetworkImage = !userPreferences.loadImages
-        // Modifying headers causes SEGFAULTS, so disallow multi window if headers are enabled.
         settings.setSupportMultipleWindows(userPreferences.popupsEnabled && !modifiesHeaders)
-
         settings.loadWithOverviewMode = userPreferences.overviewModeEnabled
+        settings.textZoom = userPreferences.browserTextSize + MIN_BROWSER_TEXT_SIZE
 
-        settings.textZoom = userPreferences.browserTextSize +  MIN_BROWSER_TEXT_SIZE
-
-        // Apply default settings for third-party cookies
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, defaultDomainSettings.thirdPartyCookies)
-
-
-        applyDarkMode();
+        applyDarkMode()
     }
 
-    /**
-     * Apply dark mode as needed.
-     * We try to go dark when using app dark theme or when page is forced to dark mode.
-     *
-     * To test that you can load:
-     * https://septatrix.github.io/prefers-color-scheme-test/
-     *
-     * See also:
-     * https://stackoverflow.com/questions/57449900/letting-webview-on-android-work-with-prefers-color-scheme-dark
-     */
     private fun applyDarkMode() {
         val settings = webView?.settings ?: return
 
-        // We needed to add this for force dark mode to work when targeting SDK>=33
-        // See: https://developer.android.com/about/versions/13/behavior-changes-13#webview-color-theme
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-            // For forced dark mode to work on website that do not provide a dark theme we need to enable this
             WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, darkMode)
         }
 
-        // If forced dark mode is supported
         if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK) &&
-            // and we are in dark theme or forced dark mode
             ((activity as ThemedActivity).isDarkTheme() || darkMode)) {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK_STRATEGY)) {
                 if (darkMode) {
-                    // User requested forced dark mode from menu, we need to enable user agent dark mode then.
                     WebSettingsCompat.setForceDarkStrategy(
                         settings,
-                        // Looks like that flag it's not working and will just do user agent dark mode even if page supports dark web theme.
-                        // That means that when using app light theme you can't get dark web theme, you will just get user agent dark theme.
-                        // No big deal though, just use app dark theme if you want proper web dark theme.
                         WebSettingsCompat.DARK_STRATEGY_PREFER_WEB_THEME_OVER_USER_AGENT_DARKENING
                     )
                 } else {
-                    // We are in app dark theme but this page does not forces to dark mode
-                    // Just request dark web theme then.
-                    // That's actually the only way to dark web theme rather than user agent darkening, see above comment.
                     WebSettingsCompat.setForceDarkStrategy(
                         settings,
                         WebSettingsCompat.DARK_STRATEGY_WEB_THEME_DARKENING_ONLY
                     )
                 }
             }
-
-            // We are either in app dark theme or forced dark mode, just request dark theme without actually forcing it.
-            // Yes I know that flag's name is misleading to say the least.
             WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_ON)
         } else {
-            // We are neither app dark theme or force dark mode or force dark mode is not supported.
             if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-                // We are in app light theme and force dark mode is disabled therefore:
                 WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_OFF)
             } else {
-                // WebView force dark mode is not supported.
                 if (darkMode) {
-                    // Fallback to our special rendering mode then if user requests dark mode
-                    // TODO: Have a setting option to make this the default behaviour?
                     setColorMode(RenderingMode.INVERTED_GRAYSCALE)
                 } else {
                     setColorMode(userPreferences.renderingMode)
@@ -776,20 +567,14 @@ class WebPageTab(
         }
     }
 
-    /**
-     * Initialize the settings of the WebView that are intrinsic to Lightning and cannot be altered
-     * by the user. Distinguish between Incognito and Regular tabs here.
-     */
     @SuppressLint("NewApi")
     private fun WebView.initializeSettings() {
         settings.apply {
-            // That needs to be false for WebRTC to work at all, don't ask me why
             mediaPlaybackRequiresUserGesture = false
 
             if (API >= Build.VERSION_CODES.LOLLIPOP && !isIncognito) {
                 mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             } else if (API >= Build.VERSION_CODES.LOLLIPOP) {
-                // We're in Incognito mode, reject
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             }
 
@@ -800,7 +585,6 @@ class WebPageTab(
                 cacheMode = WebSettings.LOAD_DEFAULT
             } else {
                 domStorageEnabled = false
-                // TODO: Is this really needed for incognito mode?
                 cacheMode = LOAD_NO_CACHE
                 databaseEnabled = false
                 cacheMode = WebSettings.LOAD_NO_CACHE
@@ -813,10 +597,7 @@ class WebPageTab(
             allowFileAccess = true
             allowFileAccessFromFileURLs = false
             allowUniversalAccessFromFileURLs = false
-            // Needed to prevent CTRL+TAB to scroll back to top of the page
-            // See: https://github.com/Slion/Fulguris/issues/82
             setNeedInitialFocus(false)
-
 
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
                 getPathObservable("geolocation")
@@ -827,36 +608,22 @@ class WebPageTab(
                     }
             }
         }
-
     }
 
     private fun getPathObservable(subFolder: String) = Single.fromCallable {
         activity.getDir(subFolder, 0)
     }
 
-    /**
-     * This method is used to toggle the user agent between desktop and the current preference of
-     * the user.
-     */
     fun toggleDesktopUserAgent(aBypass: Boolean = true) {
-        // Toggle desktop mode
         desktopMode = !desktopMode
         desktopModeBypassDomainSettings = aBypass
     }
 
-    /**
-     *
-     */
     fun toggleDarkMode(aBypass: Boolean = true) {
-        // Toggle dark mode
         darkMode = !darkMode
         darkModeBypassDomainSettings = aBypass
     }
 
-
-    /**
-     * This method sets the user agent of the current tab based on the user's preference
-     */
     private fun setUserAgentForPreference(userPreferences: UserPreferences) {
         webView?.settings?.let { settings ->
             settings.userAgentString = userPreferences.userAgent(activity.application)
@@ -864,128 +631,60 @@ class WebPageTab(
         }
     }
 
-    /**
-     * Save the state of this tab Web View and return it as a [Bundle].
-     * We get that state bundle either directly from our Web View,
-     * or from our frozen tab initializer if ever our Web View was never loaded.
-     */
     private fun webViewState(): Bundle {
-        // Use frozen bundle from latent tab initializer if available
         latentTabInitializer?.tabModel?.webView?.let { return it }
-
-        // Otherwise save current WebView state
         return Bundle(ClassLoader.getSystemClassLoader()).also { webView?.saveState(it) }
     }
 
-    /**
-     *
-     */
     fun getModel() = TabModel(url, title, desktopMode, darkMode, favicon, searchQuery, searchActive, webViewState())
 
-    /**
-     * Save the state of this tab and return it as a [Bundle].
-     */
     fun saveState(): Bundle {
          return getModel().toBundle()
     }
-    /**
-     * Pause the current WebView instance.
-     */
+
     fun onPause() {
         webView?.onPause()
         Timber.d("WebView onPause: ${webView?.id}")
     }
 
-    /**
-     * Resume the current WebView instance.
-     */
     fun onResume() {
         webView?.onResume()
         Timber.d("WebView onResume: ${webView?.id}")
     }
 
-    /**
-     * Notify the WebView to stop the current load.
-     * Executes callback if present since this is an explicit user action.
-     */
     fun stopLoading() {
         webView?.stopLoading()
         isLoading = false
-
-        // SL: I don't think we need this here as onPageFinished is called when we stop loading
-        // Execute callback since load was explicitly stopped
-        // This ensures proper cleanup (e.g., restoring cache mode after reload)
-        //onLoadCompleteCallback?.invoke()
-        //onLoadCompleteCallback = null
     }
 
-    /**
-     * Layer type notably determines if we use hardware acceleration and WebGL
-     */
     private fun setLayerType() {
         Timber.d("$ihs : setLayerType: $layerType")
         webView?.setLayerType(layerType.value, paint)
     }
 
-    /**
-     * This method forces the layer type to hardware, which
-     * enables hardware rendering on the WebView instance
-     * of the current [WebPageTab].
-     */
     private fun setHardwareRendering() {
-        //webView?.setLayerType(View.LAYER_TYPE_SOFTWARE, paint)
         webView?.setLayerType(View.LAYER_TYPE_SOFTWARE, paint)
     }
 
-    /**
-     * This method sets the layer type to none, which
-     * means that either the GPU and CPU can both compose
-     * the layers when necessary.
-     */
     private fun setNormalRendering() {
         webView?.setLayerType(View.LAYER_TYPE_NONE, paint)
     }
 
-    /**
-     * This method forces the layer type to software, which
-     * disables hardware rendering on the WebView instance
-     * of the current [WebPageTab] and makes the CPU render
-     * the view.
-     */
     fun setSoftwareRendering() {
         webView?.setLayerType(View.LAYER_TYPE_SOFTWARE, paint)
     }
 
-    /**
-     * Sets the current rendering color of the WebView instance
-     * of the current [WebPageTab]. The for modes are normal
-     * rendering, inverted rendering, grayscale rendering,
-     * and inverted grayscale rendering
-     *
-     * @param mode the integer mode to set as the rendering mode.
-     * see the numbers in documentation above for the
-     * values this method accepts.
-     */
     private fun setColorMode(mode: RenderingMode) {
         invertPage = false
         when (mode) {
             RenderingMode.NORMAL -> {
                 paint.colorFilter = null
-                // setSoftwareRendering(); // Some devices get segfaults
-                // in the WebView with Hardware Acceleration enabled,
-                // the only fix is to disable hardware rendering
-                //setNormalRendering()
-                // SL: enabled that and the performance gain is very noticeable on  F(x)tec Pro1
-                // Notably on: https://www.bbc.com/worklife
                 setLayerType()
             }
             RenderingMode.INVERTED -> {
-                val filterInvert = ColorMatrixColorFilter(
-                    negativeColorArray
-                )
+                val filterInvert = ColorMatrixColorFilter(negativeColorArray)
                 paint.colorFilter = filterInvert
                 setLayerType()
-
                 invertPage = true
             }
             RenderingMode.GRAYSCALE -> {
@@ -1005,83 +704,43 @@ class WebPageTab(
                 val filterInvertGray = ColorMatrixColorFilter(concat)
                 paint.colorFilter = filterInvertGray
                 setLayerType()
-
                 invertPage = true
             }
-
             RenderingMode.INCREASE_CONTRAST -> {
                 val increaseHighContrast = ColorMatrixColorFilter(increaseContrastColorArray)
                 paint.colorFilter = increaseHighContrast
                 setLayerType()
             }
         }
-
     }
 
-    /**
-     * Pauses the JavaScript timers of the
-     * WebView instance, which will trigger a
-     * pause for all WebViews in the app.
-     */
     fun pauseTimers() {
         webView?.pauseTimers()
         Timber.d("Pausing JS timers")
     }
 
-    /**
-     * Resumes the JavaScript timers of the
-     * WebView instance, which will trigger a
-     * resume for all WebViews in the app.
-     */
     fun resumeTimers() {
         webView?.resumeTimers()
         Timber.d("Resuming JS timers")
     }
 
-    /**
-     * Requests focus down on the WebView instance
-     * if the view does not already have focus.
-     */
     fun requestFocus() {
         if (webView?.hasFocus() == false) {
             webView?.requestFocus()
         }
     }
 
-    /**
-     * Sets the visibility of the WebView to either
-     * View.GONE, View.VISIBLE, or View.INVISIBLE.
-     * other values passed in will have no effect.
-     *
-     * @param visible the visibility to set on the WebView.
-     */
     fun setVisibility(visible: Int) {
         webView?.visibility = visible
     }
 
-    /**
-     * Tells the WebView to reload the current page.
-     * Forces a fresh fetch from the server bypassing cache.
-     * Cache mode is temporarily changed and will be restored after page finishes loading
-     * or if the load is cancelled.
-     * If the proxy settings are not ready then the
-     * this method will not have an affect as the
-     * proxy must start before the load occurs.
-     */
     fun reload(aForce: Boolean = false) {
         webView?.let { wv ->
-
             if (!aForce) {
                 loadUrl(url)
             } else {
-                // Store original cache mode
                 val originalCacheMode = wv.settings.cacheMode
-
-                // Temporarily disable cache to force fresh reload
                 wv.settings.cacheMode = WebSettings.LOAD_NO_CACHE
-
-                // Handle the case where we display error page for instance
-                // Pass callback to restore cache mode after load completes OR is cancelled
                 loadUrl(url) {
                     wv.settings.cacheMode = originalCacheMode
                 }
@@ -1089,19 +748,11 @@ class WebPageTab(
         }
     }
 
-    /**
-     * Finds all the instances of the text passed to this
-     * method and highlights the instances of that text
-     * in the WebView.
-     *
-     * @param text the text to search for.
-     */
     @SuppressLint("NewApi")
     fun find(text: String) {
         resetFind()
         searchQuery = text
         searchActive = true
-        // Kick off our search
         webView?.findAllAsync(text)
     }
 
@@ -1119,55 +770,34 @@ class WebPageTab(
         resetFind()
     }
 
-    // Used to implement find in page
     private var iActiveMatchOrdinal: Int = -1
     private var iNumberOfMatches: Int = -1
     private var iSnackbar: Snackbar? = null
 
-    /**
-     *
-     */
     private fun resetFind() {
         iActiveMatchOrdinal = -1
         iNumberOfMatches = -1
     }
 
-    /**
-     * That's where find in page results are being reported by our WebView.
-     */
     override fun onFindResultReceived(activeMatchOrdinal: Int, numberOfMatches: Int, isDoneCounting: Boolean) {
-
-        // If our page is still loading or if our find in page search is not complete
         if (isLoading || !isDoneCounting) {
-            // Just don't report intermediary results
             return
         }
-        // Only display message if something was changed
         if (iActiveMatchOrdinal != activeMatchOrdinal || iNumberOfMatches != numberOfMatches) {
-
-            // Remember what we last reported
             iActiveMatchOrdinal = activeMatchOrdinal
             iNumberOfMatches = numberOfMatches
 
-            // Empty search query just dismisses any results previously displayed
-            // Notably useful when doing backspace on the search field until no characters are left
             if (searchQuery.isEmpty()) {
-                // Hide last snackbar to avoid having outdated stats lingering
                 iSnackbar?.dismiss()
-            }
-            // Check if our search is reporting any match
-            else if (iNumberOfMatches==0) {
-                // Find in page did not find any match, tell our user about it
+            } else if (iNumberOfMatches==0) {
                 iSnackbar = activity.makeSnackbar(
                         activity.getString(R.string.no_match_found),
                         Snackbar.LENGTH_SHORT, if (activity.configPrefs.toolbarsBottom) Gravity.TOP else Gravity.BOTTOM)
                         .setAction(R.string.button_dismiss) {
                             iSnackbar?.dismiss()
                         }
-
                 iSnackbar?.show()
             } else {
-                // Show our user how many matches we have and which one is currently focused
                 val currentMatch = iActiveMatchOrdinal + 1
                 iSnackbar = activity.makeSnackbar(
                         activity.getString(R.string.match_x_of_n,currentMatch,iNumberOfMatches) ,
@@ -1175,94 +805,44 @@ class WebPageTab(
                         .setAction(R.string.button_dismiss) {
                             iSnackbar?.dismiss()
                         }
-
                 iSnackbar?.show()
             }
         }
     }
 
-    /**
-     * Notify the tab to shutdown and destroy
-     * its WebView instance and to remove the reference
-     * to it. After this method is called, the current
-     * instance of the [WebPageTab] is useless as
-     * the WebView cannot be recreated using the public
-     * api.
-     */
     fun destroy() {
         destroyWebView()
         networkDisposable.dispose()
     }
 
-    /**
-     * Destroy our WebView after we unregister from all various handlers and listener as needed
-     */
     private fun destroyWebView() {
         userPreferences.preferences.unregisterOnSharedPreferenceChangeListener(this)
         defaultDomainSettings.preferences.unregisterOnSharedPreferenceChangeListener(this)
         destroyDownloadListener()
-        // No need to do anything for the touch listeners they are owned by the WebView anyway
         webView?.autoDestruction()
         webView = null
     }
 
-    /**
-     * Tell the WebView to navigate backwards
-     * in its history to the previous page.
-     */
     fun goBack() {
-        // History navigation may not fire onPageStarted (notably YouTube.com), so mark
-        // loading here to show the stop button right away.
         isLoading = true
         webView?.goBack()
     }
 
-    /**
-     * Tell the WebView to navigate forwards
-     * in its history to the next page.
-     */
     fun goForward() {
-        // History navigation may not fire onPageStarted (notably YouTube.com), so mark
-        // loading here to show the stop button right away.
         isLoading = true
         webView?.goForward()
     }
 
-    /**
-     * Navigate forward or backward by the specified number of steps in the history.
-     * Positive steps go forward, negative steps go backward.
-     *
-     * @param steps Number of steps to navigate (negative for back, positive for forward)
-     */
     fun goBackOrForward(steps: Int) {
-        // History navigation may not fire onPageStarted (notably YouTube.com), so mark
-        // loading here to show the stop button right away.
         isLoading = true
         webView?.goBackOrForward(steps)
     }
 
-    /**
-     * Notifies the [WebView] whether the network is available or not.
-     */
     private fun setNetworkAvailable(isAvailable: Boolean) {
         webView?.setNetworkAvailable(isAvailable)
     }
 
-    /**
-     * Handles a long click on the page and delegates the URL to the
-     * proper dialog if it is not null, otherwise, it tries to get the
-     * URL using HitTestResult.
-     *
-     * @param url the url that should have been obtained from the WebView touch node
-     * thingy, if it is null, this method tries to deal with it and find
-     * a workaround.
-     * @param text Text from the target Anchor
-     * @param src Source from the target Image
-     */
     private fun longClickPage(url: String?, text: String?, src: String?) {
-        // The touch that triggered the long press (a real finger, or the cursor controller's
-        // synthetic touch) is what populates the hit-test state; it is still current when
-        // this runs.
         val result = webView?.hitTestResult
         val currentUrl = webView?.url
         val newUrl = result?.extra
@@ -1288,8 +868,6 @@ class WebPageTab(
                 }
             }
         } else {
-
-            // See: https://developer.android.com/reference/android/webkit/WebView#getHitTestResult()
             result?.extra?.let { extraUrl ->
                 if (result.type == WebView.HitTestResult.IMAGE_TYPE) {
                     dialogBuilder.showLongPressLinkImageDialog(
@@ -1310,53 +888,51 @@ class WebPageTab(
                         showImageTab = false
                     )
                 }
-                // TODO: UNKNOWN_TYPE for JavaScript URLs do we really want to?
-                // TODO: Handle other types such as phone, geo and email
             }
         }
     }
 
-    /**
-     * Determines whether or not the WebView can go
-     * backward or if it as the end of its history.
-     *
-     * @return true if the WebView can go back, false otherwise.
-     */
     fun canGoBack(): Boolean = webView?.canGoBack() == true
 
-    /**
-     * Determine whether or not the WebView can go
-     * forward or if it is at the front of its history.
-     *
-     * @return true if it can go forward, false otherwise.
-     */
     fun canGoForward(): Boolean = webView?.canGoForward() == true
 
     /**
-     * Loads the URL in the WebView. If the proxy settings
-     * are still initializing, then the URL will not load
-     * as it is necessary to have the settings initialized
-     * before a load occurs.
-     *
-     * SL: Funny enough this is hardly ever used only when opening new tba from intent apparently
-     *
-     * @param aUrl the non-null URL to attempt to load in
-     * the WebView.
-     * @param onLoadComplete optional callback to execute after the page finishes loading or is cancelled.
-     * Will be executed once and then cleared automatically.
+     * 核心接管加载方法：
+     * 1. 遇到 g.6z.ee 时，直接将原本默认的 80/443 接管为 802/803 端口直连；
+     * 2. 其他任何正常域名原封不动放行，绝不受任何干扰；
+     * 3. 0ms 瞬间直达，无需外建任何工具类。
      */
     fun loadUrl(aUrl: String, onLoadComplete: (() -> Unit)? = null) {
-
-        // Mark loading for the new page load so the stop button shows right away
         isLoading = true
 
-        iTargetUrl = Uri.parse(aUrl)
+        val uri = try { Uri.parse(aUrl) } catch (e: Exception) { Uri.parse("") }
+        val scheme = uri.scheme?.lowercase() ?: "http"
+        val host = uri.host?.lowercase() ?: ""
 
-        // Store the callback if provided
+        val finalUrl = if (uri.port == -1 && (scheme == "http" || scheme == "https")) {
+            val targetPort = when {
+                host == "g.6z.ee" && scheme == "http" -> 802
+                host == "g.6z.ee" && scheme == "https" -> 803
+                // 未来如有其他解析了非标端口的域名，直接在此追加一行即可
+                else -> null
+            }
+
+            if (targetPort != null) {
+                val path = uri.encodedPath ?: ""
+                val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
+                val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
+                "$scheme://$host:$targetPort$path$query$fragment"
+            } else {
+                aUrl
+            }
+        } else {
+            aUrl
+        }
+
+        iTargetUrl = Uri.parse(finalUrl)
         onLoadCompleteCallback = onLoadComplete
 
         if (iTargetUrl.scheme == Schemes.Fulguris || iTargetUrl.scheme == Schemes.About) {
-            //TODO: support more of our custom URLs?
             if (iTargetUrl.host == Hosts.Home) {
                 loadHomePage()
             } else if (iTargetUrl.host == Hosts.Bookmarks) {
@@ -1365,84 +941,50 @@ class WebPageTab(
                 loadHistoryPage()
             }
         } else {
-            webView?.loadUrl(aUrl, requestHeaders)
+            webView?.loadUrl(finalUrl, requestHeaders)
         }
     }
 
-    /**
-     * Check relevant user preferences and configuration before showing the tool bar if needed
-     */
     fun showToolBarOnScrollUpIfNeeded() {
         if (webView?.context?.configPrefs?.showToolBarOnScrollUp == true) {
             webBrowser.showActionBar()
         }
     }
 
-    /**
-     * Check relevant user preferences and configuration before showing the tool bar if needed
-     */
     fun showToolBarOnPageTopIfNeeded() {
         if (webView?.context?.configPrefs?.showToolBarOnPageTop == true) {
             webBrowser.showActionBar()
         }
     }
 
-    /**
-     * Our render process crashed, we must destroy our WebView.
-     */
     fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-
-        // Defensive
         if (view!=webView) {
             Timber.w("onRenderProcessGone: Not our WebView")
-            // Still don't want to crash the app
             return true
         }
 
-        // Refreeze our tab before destroying it's WebView
-        // Tested that against Bookmarks page and it worked fine too
         latentTabInitializer = FreezableBundleInitializer(getModel())
         val vg = webView?.removeFromParent()
         destroyWebView()
 
         vg?.let {
-            // That should run if the current tab lost its render process
-            // TODO: Proper dialog with bug report link?
-            // TODO: Firebase report?
-            // Would be nice to have ACRA: https://github.com/ACRA/acra
-            // Show user a message if this is our current tab
             iSnackbar = activity.makeSnackbar(
                 activity.getString(R.string.message_render_process_crashed),
                 5000, if (activity.configPrefs.toolbarsBottom) Gravity.TOP else Gravity.BOTTOM)
-                /*.setAction(R.string.button_dismiss) {
-                    iSnackbar?.dismiss()
-                }*/.setIcon(R.drawable.ic_warn)
+                .setIcon(R.drawable.ic_warn)
 
             iSnackbar?.show()
 
-            // TODO: Another broken workflow, just refactor our tab manager and presenter
-            // We could not get presenter injection to work so we just use the one from our activity
             (activity as? WebBrowserActivity)?.apply {
-                // Trigger the recreation of our tab
                 tabsManager.tabChanged(tabsManager.indexOfTab(this@WebPageTab),false,false)
             }
         }
 
-        // Needed I guess in case the current tab was using another render process
         webBrowser.onTabChanged(this)
-
-        // We don't want to crash the app
         return true
     }
 
-
-    /**
-     * The OnTouchListener used by the WebView so we can
-     * get scroll events and show/hide the action bar when
-     * the page is scrolled up/down.
-     */
     private open inner class TouchListenerLollipop : OnTouchListener {
-
         internal var location: Float = 0f
         protected var touchingScreen: Boolean = false
         internal var y: Float = 0f
@@ -1450,7 +992,6 @@ class WebPageTab(
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouch(view: View?, arg1: MotionEvent): Boolean {
-
             if (view == null) return false
 
             if (!view.hasFocus()) {
@@ -1459,48 +1000,31 @@ class WebPageTab(
 
             action = arg1.action
             y = arg1.y
-            // Handle tool bar visibility when doing slow scrolling
             if (action == MotionEvent.ACTION_DOWN) {
                 location = y
                 touchingScreen=true
-            }
-            // Only show or hide tool bar when the user stop touching the screen otherwise that looks ugly.
-            // ACTION_CANCEL (e.g. the system or our cursor controller taking the touch over) also ends
-            // the touch — clear the flag there too, or it would stay stuck true after a canceled touch.
-            else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 val distance = y - location
                 touchingScreen=false
                 if (view.scrollY < SCROLL_DOWN_THRESHOLD
-                        // Touch input won't show tool bar again if no vertical scroll
-                        // It can still be accessed using the back button
                         && view.canScrollVertically()) {
                     showToolBarOnPageTopIfNeeded()
                 } else if (distance < -SCROLL_UP_THRESHOLD) {
-                    // Aggressive hiding of tool bar
                     webBrowser.hideActionBar()
                 }
                 location = 0f
             }
 
-            // Handle tool bar visibility upon fling gesture
             gestureDetector.onTouchEvent(arg1)
-
             return false
         }
     }
 
-    /**
-     * Improved touch listener for devices above API 21 Lollipop
-     */
     @RequiresApi(Build.VERSION_CODES.M)
     private inner class TouchListener: TouchListenerLollipop(), OnScrollChangeListener {
-
         override fun onScrollChange(view: View?, scrollX: Int, scrollY: Int, oldScrollX: Int, oldScrollY: Int) {
-
             view?.apply {
                 if (canScrollVertically()) {
-                    // Handle the case after fling all the way to the top of the web page
-                    // Are we near the top of our web page and is user finger not on the screen
                     if (scrollY < SCROLL_DOWN_THRESHOLD && !touchingScreen) {
                         showToolBarOnPageTopIfNeeded()
                     }
@@ -1509,26 +1033,10 @@ class WebPageTab(
         }
     }
 
-    /**
-     * The SimpleOnGestureListener used by the [TouchListener]
-     * in order to delegate show/hide events to the action bar when
-     * the user flings the page. Also handles long press events so
-     * that we can capture them accurately.
-     */
     private inner class CustomGestureListener(private val view: View) : SimpleOnGestureListener() {
-
-        /**
-         * Without this, onLongPress is not called when user is zooming using
-         * two fingers, but is when using only one.
-         *
-         *
-         * The required behaviour is to not trigger this when the user is
-         * zooming, it shouldn't matter how much fingers the user's using.
-         */
         private var canTriggerLongPress = true
 
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-
             if (e1==null) {
                 return false
             }
@@ -1536,10 +1044,7 @@ class WebPageTab(
             val power = (velocityY * 100 / maxFling).toInt()
             if (power < -10) {
                 webBrowser.hideActionBar()
-            } else if (power > 15
-                    // Touch input won't show tool bar again if no top level vertical scroll
-                    // It can still be accessed using the back button
-                    && view.canScrollVertically()) {
+            } else if (power > 15 && view.canScrollVertically()) {
                 showToolBarOnScrollUpIfNeeded()
             }
             return super.onFling(e1, e2, velocityX, velocityY)
@@ -1551,69 +1056,39 @@ class WebPageTab(
                 if (msg != null) {
                     msg.target = webViewHandler
                     webView?.requestFocusNodeHref(msg)
-                    // We handle the long press ourselves (a custom dialog via requestFocusNodeHref),
-                    // so cancel the WebView's own native long-press. Otherwise its renderer keeps
-                    // an internal long-press/context-menu input state "active" (it fired the page's
-                    // contextmenu but never showed/dismissed the native menu) and — after a couple of
-                    // long presses on the same page — stops delivering *any* touch input to the page
-                    // (even real hardware taps) until the page reloads. cancelLongPress() is exactly
-                    // the documented API for "I handled the long press, don't also handle it".
-                    // Regression: test_cursor_context_menu_repeated_long_press_touch_stays_clean.
                     webView?.cancelLongPress()
                 }
             }
         }
 
-        /**
-         * Is called when the user is swiping after the doubletap, which in our
-         * case means that he is zooming.
-         */
         override fun onDoubleTapEvent(e: MotionEvent): Boolean {
             canTriggerLongPress = false
             return false
         }
 
-        /**
-         * Is called when something is starting being pressed, always before
-         * onLongPress.
-         */
         override fun onShowPress(e: MotionEvent) {
             canTriggerLongPress = true
         }
 
-        /**
-         *
-         */
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             webBrowser.onSingleTapUp(this@WebPageTab)
             return false
         }
     }
 
-    /**
-     * A Handler used to get the URL from a long click
-     * event on the WebView. It does not hold a hard
-     * reference to the WebView and therefore will not
-     * leak it if the WebView is garbage collected.
-     */
     private class WebViewHandler(view: WebPageTab) : Handler() {
-
         private val reference: WeakReference<WebPageTab> = WeakReference(view)
 
         override fun handleMessage(msg: Message) {
             super.handleMessage(msg)
-            // Fetch message data: url, text, image source
-            // See: https://developer.android.com/reference/android/webkit/WebView#requestFocusNodeHref(android.os.Message)
             val url = msg.data.getString("url")
             val title = msg.data.getString("title")
             val src = msg.data.getString("src")
-            //
             reference.get()?.longClickPage(url,title,src)
         }
     }
 
     companion object {
-
         public const val KHtmlMetaThemeColorInvalid: Int = Color.TRANSPARENT
 
         const val HEADER_REQUESTED_WITH = "X-Requested-With"
