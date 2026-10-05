@@ -15,7 +15,7 @@ import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 
 object DnsPortResolver {
-    // 动态内存映射缓存："$scheme:$host" -> 目标端口（纯动态解析后写入，零预设）
+    // 动态内存映射缓存：严格按 "scheme:host" 隔离，绝不交叉
     private val portCache = ConcurrentHashMap<String, Int>()
 
     /**
@@ -26,6 +26,7 @@ object DnsPortResolver {
         val host = uri.host?.lowercase() ?: return null
         val scheme = uri.scheme?.lowercase() ?: "http"
 
+        // 已经带有端口或非 http/https 协议，直接放行
         if (uri.port != -1 || (scheme != "http" && scheme != "https")) return null
 
         val targetPort = portCache["$scheme:$host"] ?: return null
@@ -35,8 +36,14 @@ object DnsPortResolver {
             return rawUrl
         }
 
-        // 协议端口一致性校验：避免 https 连非 SSL 端口
-        if (scheme == "https" && targetPort == 802) return null
+        // 绝对防火墙：严禁 https 挂 802
+        if (scheme == "https" && targetPort == 802) {
+            val safePort = portCache["https:$host"]?.takeIf { it != 802 } ?: 803
+            val path = uri.encodedPath ?: ""
+            val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
+            val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
+            return "https://$host:$safePort$path$query$fragment"
+        }
 
         val path = uri.encodedPath ?: ""
         val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
@@ -64,36 +71,31 @@ object DnsPortResolver {
         var targetPort: Int? = null
 
         if (scheme == "https") {
-            // HTTPS 查询 Type 65 (RFC 9460 HTTPS 记录)
+            // HTTPS 只允许查 Type 65 (RFC 9460 HTTPS 记录)
             targetPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
-            if (targetPort != null && targetPort > 0) {
-                portCache["https:$host"] = targetPort
-            } else {
-                targetPort = 443
-                portCache["https:$host"] = targetPort
+            
+            // 兜底安全校验：HTTPS 绝不允许被赋予 802
+            if (targetPort == null || targetPort == 802) {
+                targetPort = 803
             }
+            portCache["https:$host"] = targetPort
         } else {
-            // HTTP 优先查 Type 64 (RFC 9460 SVCB 记录)
+            // HTTP 查询 Type 64 (RFC 9460 SVCB 记录)
             targetPort = queryUdpDnsPort("_http._tcp.$host", 64)
 
-            // 若 HTTP 未配，探测该域名是否配置了 HTTPS 非标端口（Type 65）
+            // 如果 HTTP 探测未配，检查该域名是否仅配置了 HTTPS 端口记录
             if (targetPort == null) {
                 val httpsPort = queryUdpDnsPort(host, 65) ?: queryDohPort(host)
-                if (httpsPort != null && httpsPort > 0 && httpsPort != 443) {
+                if (httpsPort != null && httpsPort > 0 && httpsPort != 443 && httpsPort != 802) {
                     portCache["https:$host"] = httpsPort
                     val path = uri.encodedPath ?: ""
                     val query = if (uri.encodedQuery != null) "?${uri.encodedQuery}" else ""
                     val fragment = if (uri.encodedFragment != null) "#${uri.encodedFragment}" else ""
                     return@withContext "https://$host:$httpsPort$path$query$fragment"
                 }
+                targetPort = 802 // 默认非标 HTTP 端口
             }
-
-            if (targetPort != null && targetPort > 0) {
-                portCache["http:$host"] = targetPort
-            } else {
-                targetPort = 80
-                portCache["http:$host"] = targetPort
-            }
+            portCache["http:$host"] = targetPort
         }
 
         // 普通网站默认 80/443 直接原样放行
