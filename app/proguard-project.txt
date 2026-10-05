@@ -146,3 +146,14 @@
     public static com.anthonycr.mezzanine._Mezzanine_TextReflow providesTextReflow();
 }
 # End Hilt specific rules
+
+# ==============================================================================
+# 自定义 DNS 端口解析与网络调度规则 (防止 R8 优化压缩或裁剪)
+# ==============================================================================
+-keep class fulguris.utils.DnsPortResolver { *; }
+-keepclassmembers class fulguris.utils.DnsPortResolver { *; }
+
+# 保护 Kotlin 协程及元数据完整，防止编译报警告或裁剪掉调度器
+-dontwarn kotlinx.coroutines.**
+-keep class kotlinx.coroutines.** { *; }
+-keepattributes *Annotation*,InnerClasses,Signature,EnclosingMethod
