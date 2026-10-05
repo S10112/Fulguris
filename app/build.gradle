@@ -57,7 +57,14 @@ android {
     // Specify namespace for generated R and BuildConfig classes
     namespace = 'fulguris'
 
+    // ==========================================================
+    // 修改输出的 APK / AAB 基础前缀为 Jincheng
+    // ==========================================================
+    project.ext.archivesBaseName = "Jincheng"
+
     defaultConfig {
+        // 修改为独立的金成浏览器 Application ID，防止与原版应用冲突
+        applicationId "com.jincheng.browser"
         minSdk = libs.versions.minSdk.get().toInteger()
         targetSdk = libs.versions.compileSdk.get().toInteger()
         vectorDrawables.useSupportLibrary = true
@@ -128,7 +135,9 @@ android {
         slions {
             dimension "BRAND"
             isDefault = true
-            applicationId "net.slions.fulguris"
+            // 确保这里的 ApplicationID 在不变更时不会覆盖 defaultConfig 的
+            // 如果你需要完全分离，可以把它也注释掉，或者改为 "com.jincheng.browser"
+            applicationId "com.jincheng.browser"
             versionCode libs.versions.slions.version.code.get().toInteger()
             versionName libs.versions.slions.version.name.get()
         }
@@ -229,20 +238,14 @@ android {
     // Needed to customize our APK file name per flavor
     applicationVariants.configureEach { variant ->
         variant.outputs.configureEach { output ->
-            //def appId = variant.applicationId// com.exampleFree.app OR com.examplePaid.app
             def versionName = variant.versionName
-            //def versionCode = variant.versionCode // e.g 1.0
-            //def flavorName = variant.flavorName // e. g. Free
-            //def buildType = variant.buildType.name // e. g. debug
-            //def variantName = variant.name // e. g. FreeDebug
-
-            // Just replace our archive base name, which by default is "app" with our own format according to flavor
+            
+            // ==========================================================
+            // 将打出来的 APK 名字前缀从 Fulguris 改成 Jincheng
+            // ==========================================================
             if (variant.flavorName.contains("slions")) {
-                //println("Use Fulguris archive name")
-                outputFileName = outputFileName.replaceFirst("^${base.archivesName.get()}", "Fulguris-v$versionName")
+                outputFileName = outputFileName.replaceFirst("^${base.archivesName.get()}", "Jincheng-v$versionName")
             }
-            //customize your app name by using variables
-            //outputFileName = "${variantName}.apk"
         }
 
         // Allow application id access from resources, most useful for explicit intent
@@ -271,7 +274,7 @@ jacoco {
     toolVersion = '0.8.7' // See http://www.eclemma.org/jacoco/
 }
 
-// Name the AAB like the APKs above (Fulguris-v<version>-<dashed-variant>.aab).
+// Name the AAB like the APKs above (Jincheng-v<version>-<dashed-variant>.aab).
 // AGP names the AAB from base.archivesName (default "app") plus the dashed
 // variant name, but the sign task's finalBundleFile output CAN be re-set at
 // configuration time. That matters because Android Studio's "Generate Signed
@@ -283,16 +286,16 @@ android.applicationVariants.configureEach { variant ->
     // The sign task is what actually writes the final AAB (FinalizeBundleTask).
     // Its default output name is "app-<dashed-variant>.aab"; just swap the prefix.
     tasks.matching { it.name == "sign${variantName}Bundle" }.configureEach { signTask ->
-        def aabFileName = signTask.finalBundleFileName.replaceFirst(/^app-/, "Fulguris-v${variant.versionName}-")
+        def aabFileName = signTask.finalBundleFileName.replaceFirst(/^app-/, "Jincheng-v${variant.versionName}-")
         signTask.finalBundleFile.set(layout.buildDirectory.file("outputs/bundle/${variant.name}/${aabFileName}"))
     }
     // Safety net: if an old-format app-*.aab is left behind (e.g. by a build
-    // before this change), move it so the output dir only holds the Fulguris name.
+    // before this change), move it so the output dir only holds the Jincheng name.
     tasks.matching { it.name == "bundle${variantName}" }.configureEach { bundleTask ->
         bundleTask.doLast {
             def outDir = layout.buildDirectory.dir("outputs/bundle/${variant.name}").get().asFile
             outDir.listFiles()?.findAll { it.name.startsWith("app-") && it.name.endsWith(".aab") }?.each { aab ->
-                if (!aab.renameTo(new File(outDir, aab.name.replaceFirst(/^app-/, "Fulguris-v${variant.versionName}-")))) {
+                if (!aab.renameTo(new File(outDir, aab.name.replaceFirst(/^app-/, "Jincheng-v${variant.versionName}-")))) {
                     throw new GradleException("Failed to rename AAB ${aab.name}")
                 }
                 println "Renamed AAB: ${aab.name}"
