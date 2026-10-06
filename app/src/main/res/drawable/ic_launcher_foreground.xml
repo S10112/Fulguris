@@ -5,38 +5,48 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 1. 外发光光晕层（散发金色光芒氛围） -->
+    <!-- 1. 广域发散光晕（营造金光四射的辉光氛围） -->
     <path
         android:pathData="M10.1337,2.4046L7.1587,5.4366L10.1517,8.3976L7.0987,11.4156L9.1357,14.4306L5.9277,22.4766L13.2347,15.3856L12.0797,12.5746L16.1747,9.3326L14.1667,6.4306L18.0717,1.5236L10.1337,2.4046Z"
-        android:strokeWidth="5"
-        android:strokeColor="#80FFD54F"
+        android:strokeWidth="10"
+        android:strokeColor="#33FFD700"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:fillColor="#59FFCA28" />
+        android:fillColor="#00000000" />
 
-    <!-- 2. 金属流光主体（从白金色高光贯穿到饱满纯金与暗金色阴影） -->
+    <!-- 2. 近核强辉光层 -->
+    <path
+        android:pathData="M10.1337,2.4046L7.1587,5.4366L10.1517,8.3976L7.0987,11.4156L9.1357,14.4306L5.9277,22.4766L13.2347,15.3856L12.0797,12.5746L16.1747,9.3326L14.1667,6.4306L18.0717,1.5236L10.1337,2.4046Z"
+        android:strokeWidth="4"
+        android:strokeColor="#80FFE082"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#80FFD700" />
+
+    <!-- 3. 主体：24K 璀璨黄金流光渐变（白金 -> 亮金 -> 赤金） -->
     <path android:pathData="M10.1337,2.4046L7.1587,5.4366L10.1517,8.3976L7.0987,11.4156L9.1357,14.4306L5.9277,22.4766L13.2347,15.3856L12.0797,12.5746L16.1747,9.3326L14.1667,6.4306L18.0717,1.5236L10.1337,2.4046Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="linear"
                 android:startX="32"
                 android:startY="18"
-                android:endX="76"
-                android:endY="90">
-                <item android:offset="0.00" android:color="#FFFFFF" /> <!-- 顶角强反光高光 -->
-                <item android:offset="0.18" android:color="#FFF59D" /> <!-- 白金高亮区 -->
-                <item android:offset="0.40" android:color="#FFD54F" /> <!-- 璀璨金 -->
-                <item android:offset="0.70" android:color="#FFB300" /> <!-- 核心黄金色 -->
-                <item android:offset="1.00" android:color="#FF8F00" /> <!-- 底部立体暗金 -->
+                android:endX="78"
+                android:endY="92">
+                <item android:offset="0.00" android:color="#FFFFFF" /> <!-- 耀眼白高光 -->
+                <item android:offset="0.15" android:color="#FFF9C4" /> <!-- 白金色 -->
+                <item android:offset="0.40" android:color="#FFEB3B" /> <!-- 鲜亮黄金 -->
+                <item android:offset="0.70" android:color="#FFC107" /> <!-- 浓郁真金 -->
+                <item android:offset="0.90" android:color="#FFA000" /> <!-- 沉淀金 -->
+                <item android:offset="1.00" android:color="#FF8F00" /> <!-- 暗赤金底色 -->
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- 3. 闪电高光边缘（增强折角刀锋反光感） -->
+    <!-- 4. 镜面高光刀锋线（极致反射质感） -->
     <path
         android:pathData="M10.1337,2.4046L7.1587,5.4366L10.1517,8.3976L7.0987,11.4156L9.1357,14.4306L5.9277,22.4766L13.2347,15.3856L12.0797,12.5746L16.1747,9.3326L14.1667,6.4306L18.0717,1.5236L10.1337,2.4046Z"
-        android:strokeWidth="0.8"
-        android:strokeColor="#FFFFFF"
-        android:strokeAlpha="0.7"
+        android:strokeWidth="1.2"
+        android:strokeColor="#FFFFEE"
+        android:strokeAlpha="0.9"
         android:fillColor="#00000000" />
 </vector>
