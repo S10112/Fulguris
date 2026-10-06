@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Same color as below but not overridden for debug -->
-    <color name="launcher_background">#1E3A6B</color>
-    <color name="ic_launcher_background">#1E3A6B</color>
+    <color name="launcher_background">#0D1B2A</color>
+    <color name="ic_launcher_background">#0D1B2A</color>
 </resources>
