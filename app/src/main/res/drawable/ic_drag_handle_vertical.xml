@@ -6,7 +6,7 @@
     android:tint="?attr/colorControlHighlight">
 
     <path
-        android:fillColor="@android:color/white"
+        android:fillColor="#FFD600"
         android:pathData="M360,160L360,800L440,800L440,160L360,160ZM520,160L520,800L600,800L600,160L520,160Z"/>
 
 </vector>

@@ -69,7 +69,7 @@ Using source color: #213D6D
     <!-- #111318 --> <color name="md_theme_dark_background_mediumContrast">#111318</color>
     <!-- #E2E2E9 --> <color name="md_theme_dark_onBackground_mediumContrast">#E2E2E9</color>
     <!-- #111318 --> <color name="md_theme_dark_surface_mediumContrast">#111318</color>
-    <!-- #FFFFFF --> <color name="md_theme_dark_onSurface_mediumContrast">#FFFFFF</color>
+    <!-- #FFD600 --> <color name="md_theme_dark_onSurface_mediumContrast">#FFD600</color>
     <!-- #44474F --> <color name="md_theme_dark_surfaceVariant_mediumContrast">#44474F</color>
     <!-- #DADCE6 --> <color name="md_theme_dark_onSurfaceVariant_mediumContrast">#DADCE6</color>
     <!-- #B0B1BB --> <color name="md_theme_dark_outline_mediumContrast">#B0B1BB</color>
@@ -116,9 +116,9 @@ Using source color: #213D6D
     <!-- #111318 --> <color name="md_theme_dark_background_highContrast">#111318</color>
     <!-- #E2E2E9 --> <color name="md_theme_dark_onBackground_highContrast">#E2E2E9</color>
     <!-- #111318 --> <color name="md_theme_dark_surface_highContrast">#111318</color>
-    <!-- #FFFFFF --> <color name="md_theme_dark_onSurface_highContrast">#FFFFFF</color>
+    <!-- #FFD600 --> <color name="md_theme_dark_onSurface_highContrast">#FFD600</color>
     <!-- #44474F --> <color name="md_theme_dark_surfaceVariant_highContrast">#44474F</color>
-    <!-- #FFFFFF --> <color name="md_theme_dark_onSurfaceVariant_highContrast">#FFFFFF</color>
+    <!-- #FFD600 --> <color name="md_theme_dark_onSurfaceVariant_highContrast">#FFD600</color>
     <!-- #EEEFF9 --> <color name="md_theme_dark_outline_highContrast">#EEEFF9</color>
     <!-- #C0C2CC --> <color name="md_theme_dark_outlineVariant_highContrast">#C0C2CC</color>
     <!-- #000000 --> <color name="md_theme_dark_scrim_highContrast">#000000</color>

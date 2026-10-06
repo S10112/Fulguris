@@ -12,6 +12,6 @@
 
     <path
         android:pathData="M27,6H3C2.449,6 2,6.451 2,7v16c0,0.551 0.449,1 1,1h24c0.549,0 1,-0.449 1,-1V7C28,6.451 27.549,6 27,6zM21.5,7h2v2h-2V7zM18.5,7h2v2h-2V7zM15.5,7h2v2h-2V7zM9.5,7h2v2h-2V7zM6.5,7h2v2h-2V7zM3.5,7h2v2h-2V7zM3.5,10H14v10H3.5V10zM5.5,23h-2v-2h2V23zM8.5,23h-2v-2h2V23zM11.5,23h-2v-2h2V23zM14.5,23h-2v-2h2V23zM14.5,9h-2V7h2V9zM17.5,23h-2v-2h2V23zM20.5,23h-2v-2h2V23zM23.5,23h-2v-2h2V23zM26.5,23h-2v-2h2V23zM26.5,20H16V10h10.5V20zM26.5,9h-2V7h2V9z"
-        android:fillColor="@android:color/white"/>
+        android:fillColor="#FFD600"/>
   </group>
 </vector>

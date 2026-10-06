@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- #FFFFFF --> <color name="primaryTextColor">#ffffff</color>
-    <!-- #FFFFFF --> <color name="secondaryTextColor">#ffffff</color>
+    <!-- #FFD600 --> <color name="primaryTextColor">#FFD600</color>
+    <!-- #FFD600 --> <color name="secondaryTextColor">#FFD600</color>
 
     <!-- #FF000000 --> <color name="black">#ff000000</color>
     <!-- #222222 --> <color name="gray_dark">#222222</color>
     <!-- #CDCDCD --> <color name="gray_medium">#cdcdcd</color>
-    <!-- #FFFFFF --> <color name="white">#ffffff</color>
+    <!-- #FFD600 --> <color name="white">#FFD600</color>
     <!-- #0D000000 --> <color name="gray_list_bg">#0d000000</color>
 
     <!-- Primary color is used for tool bar, status bar and  settings title bar. It's also the color of the end-of-scroll effects -->
@@ -15,7 +15,7 @@
     <!-- #66000000 --> <color name="secondary_color">#66000000</color>
     <!-- #0073EF --> <color name="accent_color">#0073EF</color>
 
-    <!-- #FFFFFF --> <color name="drawer_background">#ffffff</color>
+    <!-- #FFD600 --> <color name="drawer_background">#FFD600</color>
     <!-- #2E2E2E --> <color name="drawer_background_dark">#2E2E2E</color>
 
     <!-- Used for settings background and settings status bar background -->
@@ -38,7 +38,7 @@
     <!-- #00000000 --> <color name="transparent">#00000000</color>
 
     <!-- #8A000000 --> <color name="icon_light_theme">#8A000000</color>
-    <!-- #FFFFFFFF --> <color name="icon_dark_theme">#FFFFFFFF</color>
+    <!-- #FFD600FF --> <color name="icon_dark_theme">#FFD600FF</color>
     <!-- #40000000 --> <color name="icon_light_theme_disabled">#40000000</color>
     <!-- #8AFFFFFF --> <color name="icon_dark_theme_disabled">#8AFFFFFF</color>
 
@@ -341,7 +341,7 @@
     <!-- #323232 --> <color name="md_grey_850">#323232</color>
     <!-- #212121 --> <color name="md_grey_900">#212121</color>
     <!-- #000000 --> <color name="md_black_1000">#000000</color>
-    <!-- #FFFFFF --> <color name="md_white_1000">#ffffff</color>
+    <!-- #FFD600 --> <color name="md_white_1000">#FFD600</color>
 
     <!--blue grey-->
     <!-- #ECEFF1 --> <color name="md_blue_grey_50">#ECEFF1</color>
