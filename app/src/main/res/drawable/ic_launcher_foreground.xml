@@ -1,18 +1,42 @@
-<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-  <group
-      android:scaleX="0.5"
-      android:scaleY="0.5"
-      android:translateX="6"
-      android:translateY="6">
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 1. 外发光光晕层（散发金色光芒氛围） -->
     <path
         android:pathData="M10.1337,2.4046L7.1587,5.4366L10.1517,8.3976L7.0987,11.4156L9.1357,14.4306L5.9277,22.4766L13.2347,15.3856L12.0797,12.5746L16.1747,9.3326L14.1667,6.4306L18.0717,1.5236L10.1337,2.4046Z"
-        android:strokeWidth="1"
-        android:fillColor="#FFD600"
-        android:strokeColor="#FFD600"/>
-  </group>
+        android:strokeWidth="5"
+        android:strokeColor="#80FFD54F"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#59FFCA28" />
+
+    <!-- 2. 金属流光主体（从白金色高光贯穿到饱满纯金与暗金色阴影） -->
+    <path android:pathData="M10.1337,2.4046L7.1587,5.4366L10.1517,8.3976L7.0987,11.4156L9.1357,14.4306L5.9277,22.4766L13.2347,15.3856L12.0797,12.5746L16.1747,9.3326L14.1667,6.4306L18.0717,1.5236L10.1337,2.4046Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="32"
+                android:startY="18"
+                android:endX="76"
+                android:endY="90">
+                <item android:offset="0.00" android:color="#FFFFFF" /> <!-- 顶角强反光高光 -->
+                <item android:offset="0.18" android:color="#FFF59D" /> <!-- 白金高亮区 -->
+                <item android:offset="0.40" android:color="#FFD54F" /> <!-- 璀璨金 -->
+                <item android:offset="0.70" android:color="#FFB300" /> <!-- 核心黄金色 -->
+                <item android:offset="1.00" android:color="#FF8F00" /> <!-- 底部立体暗金 -->
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 3. 闪电高光边缘（增强折角刀锋反光感） -->
+    <path
+        android:pathData="M10.1337,2.4046L7.1587,5.4366L10.1517,8.3976L7.0987,11.4156L9.1357,14.4306L5.9277,22.4766L13.2347,15.3856L12.0797,12.5746L16.1747,9.3326L14.1667,6.4306L18.0717,1.5236L10.1337,2.4046Z"
+        android:strokeWidth="0.8"
+        android:strokeColor="#FFFFFF"
+        android:strokeAlpha="0.7"
+        android:fillColor="#00000000" />
 </vector>
