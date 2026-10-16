@@ -528,15 +528,19 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         tabsManager.doOnceAfterInitialization {
             // If our version code was changed
             if (userPreferences.versionCode != BuildConfig.VERSION_CODE) {
+                // This callback is not tied to our lifecycle (TabsManager outlives
+                // us): if we're finishing/destroyed the window token is gone and
+                // showing a dialog would crash with BadTokenException.
+                val canShowDialog = !isFinishing && !isDestroyed
                 if (userPreferences.versionCode==0
                         // Added this check to avoid show welcome message to existing installation
                         // TODO: Remove that a few versions down the road
                         && sessionsManager.sessions().count()==1 && tabsManager.allTabs.count()==1) {
                     // First run
-                    welcomeToFulguris()
+                    if (canShowDialog) welcomeToFulguris()
                 } else {
                     // Version was updated
-                    notifyVersionUpdate()
+                    if (canShowDialog) notifyVersionUpdate()
                 }
                 // Persist our current version so that we don't kick in next time
                 userPreferences.versionCode = BuildConfig.VERSION_CODE
@@ -3417,7 +3421,9 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
             // Put our incoming frame on top
             // This replaces swapTabViewsFrontToBack for this special case
             // Still must not be on top of floating action buttons (FAB) touch tab switcher
-            it.removeFromParent()?.addView(it,1)
+            it.removeFromParent()?.let { parent ->
+                parent.addView(it, 1)
+            }
             // Animate it
             iTabAnimator = it.animate()
                     .scaleY(1f)
@@ -3430,8 +3436,11 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
                                 it.scaleX = 1f
                                 it.scaleY = 1f
                                 iTabViewContainerBack.findViewById<WebViewEx>(R.id.web_view)?.apply{
-                                     removeFromParent()?.addView(iPlaceHolder)
-                                     //destroyIfNeeded()
+                                    val placeholder = iPlaceHolder
+                                    if (placeholder != null) {
+                                        removeFromParent()?.addView(placeholder)
+                                    }
+                                    //destroyIfNeeded()
                                 }
                                 //
                                 iTabAnimator = null;
@@ -4679,6 +4688,17 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
      * Display downloads in bottom sheet
      */
     fun openDownloads() {
+        // iBottomSheet is a single shared DialogFragment for every sheet: re-opening it while
+        // the previous instance is still on the back stack (e.g. the OPEN_DOWNLOADS intent
+        // delivered on a hot start while the sheet is open, or a sheet restored from a saved
+        // state) makes DialogFragment.show() add it twice and crash on the next resume with
+        // "Fragment already added". Flush any pending transaction first, then dismiss the
+        // stale instance (added or about-to-be) before showing a fresh one.
+        supportFragmentManager.executePendingTransactions()
+        if (iBottomSheet.isAdded) {
+            iBottomSheet.dismissAllowingStateLoss()
+            supportFragmentManager.executePendingTransactions()
+        }
         iBottomSheet.setLayout(R.layout.fragment_downloads).show()
     }
 
